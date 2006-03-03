@@ -120,26 +120,26 @@ typedef struct ACSISFreqInfo {
 } ACSISFreqInfo;
 
 /* Initialise the file for writing */
-void hdsSpecOpen( const char * dir,
+void acsSpecOpen( const char * dir,
 		  unsigned int yyyymmdd,
 		  unsigned int obsnum,
 		  int * status );
 
 /* Write a spectrum to the file */
-void hdsSpecWrite( size_t nchan,
+void acsSpecWrite( size_t nchan,
 		   const float spectrum[],
 		   const ACSISRecord * record,
 		   const ACSISFreqInfo * freq,
 		   int * status );
 
 /* Close the file */
-void hdsSpecClose( const AstFitsChan * fits,
+void acsSpecClose( const AstFitsChan * fits,
 		   int * status );
 
 /* NDF versions of the Spectrum writing */
 
 /* Initialise the file for writing */
-void hdsSpecOpenTS( const char * dir,
+void acsSpecOpenTS( const char * dir,
 		    unsigned int yyyymmdd,
 		    unsigned int obsnum,
 		    unsigned int nrecep,
@@ -149,14 +149,14 @@ void hdsSpecOpenTS( const char * dir,
 		    int * status );
 
 /* Write a spectrum to the file */
-void hdsSpecWriteTS( unsigned int subsys,
+void acsSpecWriteTS( unsigned int subsys,
 		     const float spectrum[],
 		     const ACSISRecord * record,
 		     const ACSISFreqInfo * freq,
 		     int * status );
 
 /* Close the file */
-void hdsSpecCloseTS( const AstFitsChan * fits[],
+void acsSpecCloseTS( const AstFitsChan * fits[],
 		   int * status );
 
 

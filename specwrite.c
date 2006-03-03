@@ -215,13 +215,13 @@ static void * extdata[MAXSUBSYS][NEXTENSIONS];
 /*
 *+
 *  Name:
-*     hdsSpecOpenTS
+*     acsSpecOpenTS
 
 *  Purpose:
 *     Open NDF file for writing time series spectra
 
 *  Invocation:
-*     hdsSpecOpenTS( const char * dir, unsigned int yyyymmdd, 
+*     acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, 
 *                    unsigned int obsnum, unsigned int nrecep,
 *                    unsigned int nsubsys, const size_t nchans[], 
 *                    int * status );
@@ -231,7 +231,7 @@ static void * extdata[MAXSUBSYS][NEXTENSIONS];
 
 *  Description:
 *     This function must be used to prepare the file for output. It must
-*     be called before calling hdsSpecWriteTS. It will be pre-sized to receive
+*     be called before calling acsSpecWriteTS. It will be pre-sized to receive
 *     spectra.
 
 *  Arguments:
@@ -263,7 +263,7 @@ static void * extdata[MAXSUBSYS][NEXTENSIONS];
 *  Notes:
 *     - Currently only one spectrum file can be open for write at any
 *     given time. It is an error for this function to be called whilst
-*     a file is open. Call hdsSpecClose to close the file.
+*     a file is open. Call acsSpecClose to close the file.
 *     - The file created by this routine will be of the form
 *       aYYYYMMDD_NNNNN.sdf where NNNNN is the zero padded observation number.
 *     - The resulting file will be an HDS container containing an NDF
@@ -293,7 +293,7 @@ static void * extdata[MAXSUBSYS][NEXTENSIONS];
 */
 
 void
-hdsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
+acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 	       unsigned int nrecep, unsigned int nsubsys, 
 	       const size_t nchans[], 
 	       const char *recepnames[], int * status ) {
@@ -318,7 +318,7 @@ hdsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
     emsSeti("NIN", nsubsys);
     emsSeti("MAX", maxsubsys);
     errRep("HDS_SPEC_OPENTS_ERR0",
-	   "hdsSpecOpenTS: number of subsystems supplied (^NIN) exceeds expected maximum of ^MAX", status);
+	   "acsSpecOpenTS: number of subsystems supplied (^NIN) exceeds expected maximum of ^MAX", status);
     return;
   }
 
@@ -328,7 +328,7 @@ hdsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
       *status = SAI__ERROR;
       emsSeti("I", i);
       errRep("HDS_SPEC_OPENTS_ERR1",
-	     "hdsSpecOpenTS called, yet an NDF file is already open (subsystem ^I)",
+	     "acsSpecOpenTS called, yet an NDF file is already open (subsystem ^I)",
 	     status);
       return;
     }
@@ -391,13 +391,13 @@ hdsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 /*
 *+
 *  Name:
-*     hdsSpecWriteTS
+*     acsSpecWriteTS
 
 *  Purpose:
 *     Write a spectrum to an HDS time-series file.
 
 *  Invocation:
-*     hdsSpecWriteTS( unsigned int subsys, const float spectrum[], 
+*     acsSpecWriteTS( unsigned int subsys, const float spectrum[], 
 *                     const ACSISRecord * record, const ACSISFreqInfo * freq,
 *                     int *status);
 
@@ -406,12 +406,12 @@ hdsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 
 *  Description:
 *     This function must be used to write a spectrum to an HDS container
-*     that had previously been opened using hdsSpecOpen.
+*     that had previously been opened using acsSpecOpen.
 
 *  Arguments:
 *     subsys = unsigned int (Given)
 *        Subsystem used for this spectrum (start counting at 0).
-*        Much match the nchans[] array given to hdsSpecOpenTS.
+*        Much match the nchans[] array given to acsSpecOpenTS.
 *     spectrum = float[nchan] (Given)
 *        Spectrum itself.
 *     record = const ACSISRecord * (Given)
@@ -430,7 +430,7 @@ hdsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 *        Original version.
 
 *  Notes:
-*     - Must have previously called hdsSpecOpenTS.
+*     - Must have previously called acsSpecOpenTS.
 
 *  Copyright:
 *     Copyright (C) 2006 Particle Physics and Astronomy Research Council.
@@ -456,7 +456,7 @@ hdsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 */
 
 void
-hdsSpecWriteTS( unsigned int subsys, const float spectrum[], 
+acsSpecWriteTS( unsigned int subsys, const float spectrum[], 
 		const ACSISRecord* record,
 		const ACSISFreqInfo * freq, int * status ) {
 
@@ -474,7 +474,7 @@ hdsSpecWriteTS( unsigned int subsys, const float spectrum[],
     *status = SAI__ERROR;
     emsSeti("IN", subsys);
     emsSeti("MAX", maxsubsys-1);
-    errRep(" ","hdsSpecWriteTS: Supplied subsystem number (^IN) exceeds max allowed (^MAX)", status);
+    errRep(" ","acsSpecWriteTS: Supplied subsystem number (^IN) exceeds max allowed (^MAX)", status);
     return;
   }
 
@@ -484,7 +484,7 @@ hdsSpecWriteTS( unsigned int subsys, const float spectrum[],
     *status = SAI__ERROR;
     emsSeti("I", subsys);
     errRep(" ",
-	   "hdsSpecWriteTS called, yet an NDF file has not been opened (subsystem ^I)",
+	   "acsSpecWriteTS called, yet an NDF file has not been opened (subsystem ^I)",
 	   status);
     return;
   }
@@ -508,7 +508,7 @@ hdsSpecWriteTS( unsigned int subsys, const float spectrum[],
     if (*status == SAI__OK && itemp != 2) {
       *status = SAI__ERROR;
       emsSeti("N", itemp);
-      errRep(" ", "hdsSpecWriteTS: Bizarre internal error. Ndims is ^N not 2",
+      errRep(" ", "acsSpecWriteTS: Bizarre internal error. Ndims is ^N not 2",
 	     status);
     }
     
@@ -516,7 +516,7 @@ hdsSpecWriteTS( unsigned int subsys, const float spectrum[],
       *status = SAI__ERROR;
       emsSeti("UB", ubnd[0]);
       emsSeti("NC", nchans_per_subsys[subsys] );
-      errRep(" ", "hdsSpecWriteTS: Bizzare internal error. Nchans is ^UB not ^NC",
+      errRep(" ", "acsSpecWriteTS: Bizzare internal error. Nchans is ^UB not ^NC",
 	     status);
     }
 
@@ -560,13 +560,13 @@ hdsSpecWriteTS( unsigned int subsys, const float spectrum[],
 /*
 *+
 *  Name:
-*     hdsSpecCloseTS
+*     acsSpecCloseTS
 
 *  Purpose:
 *     Write FITS header and close HDS file.
 
 *  Invocation:
-*     hdsSpecCloseTS( const AstFitsChan * fits[], int *status );
+*     acsSpecCloseTS( const AstFitsChan * fits[], int *status );
 
 *  Language:
 *     Starlink ANSI C
@@ -589,7 +589,7 @@ hdsSpecWriteTS( unsigned int subsys, const float spectrum[],
 *        Original version.
 
 *  Notes:
-*     - Must have previously called hdsSpecOpenTS.
+*     - Must have previously called acsSpecOpenTS.
 *     - File is resized to the actual number of spectra written.
 
 *  Copyright:
@@ -616,7 +616,7 @@ hdsSpecWriteTS( unsigned int subsys, const float spectrum[],
 */
 
 void
-hdsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
+acsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
 
   unsigned int i;           /* Loop counter */
   int found = 0;            /* Found an open NDF? */
@@ -631,7 +631,7 @@ hdsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
   if (locator == NULL) {
     *status = SAI__ERROR;
     errRep( " ",
-	    "hdsSpecCloseTS: No file is open. Has hdsSpecOpen been called?", status );
+	    "acsSpecCloseTS: No file is open. Has acsSpecOpen been called?", status );
     return;
   }
 
@@ -667,7 +667,7 @@ hdsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
   /* report error if not found any open NDFs */
   if (*status == SAI__OK && !found) {
     *status = SAI__ERROR;
-    errRep(" ", "hdsSpecCloseTS: Failed to find open NDF components", status );
+    errRep(" ", "acsSpecCloseTS: Failed to find open NDF components", status );
   }
 
   /* Close the file */
@@ -692,13 +692,13 @@ hdsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
 /*
 *+
 *  Name:
-*     hdsSpecOpen
+*     acsSpecOpen
 
 *  Purpose:
 *     Open HDS container file and prepare for writing of spectra
 
 *  Invocation:
-*     hdsSpecOpen( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
+*     acsSpecOpen( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 *                  int * status );
 
 *  Language:
@@ -706,7 +706,7 @@ hdsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
 
 *  Description:
 *     This function must be used to prepare the file for output. It must
-*     be called before calling hdsSpecWrite.
+*     be called before calling acsSpecWrite.
 
 *  Arguments:
 *     dir = const char * (Given)
@@ -728,7 +728,7 @@ hdsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
 *  Notes:
 *     - Currently only one spectrum file can be open for write at any
 *     given time. It is an error for this function to be called whilst
-*     a file is open. Call hdsSpecClose to close the file.
+*     a file is open. Call acsSpecClose to close the file.
 *     - The file created by this routine will be of the form
 *       aYYYYMMDD_NNNNN.sdf where NNNNN is the zero padded observation number.
 
@@ -756,7 +756,7 @@ hdsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
 */
 
 void
-hdsSpecOpen( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
+acsSpecOpen( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 	     int * status ) {
 
   /* Return immediately if status is bad */
@@ -773,13 +773,13 @@ hdsSpecOpen( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 /*
 *+
 *  Name:
-*     hdsSpecWrite
+*     acsSpecWrite
 
 *  Purpose:
 *     Write a spectrum to an HDS file.
 
 *  Invocation:
-*     hdsSpecWrite( size_t nchan, const float spectrum[], const ACSISRecord * record,
+*     acsSpecWrite( size_t nchan, const float spectrum[], const ACSISRecord * record,
 *                   const ACSISFreqInfo * freq, int *status);
 
 *  Language:
@@ -787,7 +787,7 @@ hdsSpecOpen( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 
 *  Description:
 *     This function must be used to write a spectrum to an HDS container
-*     that had previously been opened using hdsSpecOpen.
+*     that had previously been opened using acsSpecOpen.
 
 *  Arguments:
 *     nchan = size_t (Given)
@@ -809,7 +809,7 @@ hdsSpecOpen( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 *        Original version.
 
 *  Notes:
-*     - Must have previously called hdsSpecOpen.
+*     - Must have previously called acsSpecOpen.
 
 *  Copyright:
 *     Copyright (C) 2006 Particle Physics and Astronomy Research Council.
@@ -835,7 +835,7 @@ hdsSpecOpen( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 */
 
 void
-hdsSpecWrite( size_t nchan, const float spectrum[], const ACSISRecord* record,
+acsSpecWrite( size_t nchan, const float spectrum[], const ACSISRecord* record,
 	      const ACSISFreqInfo * freq, int * status ) {
 
   void * datapntrs[] = { NULL }; /* Array of pointers from ndfMap */
@@ -854,7 +854,7 @@ hdsSpecWrite( size_t nchan, const float spectrum[], const ACSISRecord* record,
   if (locator == NULL) {
     *status = SAI__ERROR;
     errRep( "HDS_SPEC_WRITE_ERR0",
-	    "No file is open. Has hdsSpecOpen been called?", status );
+	    "No file is open. Has acsSpecOpen been called?", status );
     return;
   }
 
@@ -902,13 +902,13 @@ hdsSpecWrite( size_t nchan, const float spectrum[], const ACSISRecord* record,
 /*
 *+
 *  Name:
-*     hdsSpecClose
+*     acsSpecClose
 
 *  Purpose:
 *     Write FITS header and close HDS file.
 
 *  Invocation:
-*     hdsSpecClose( const AstFitsChan * fits, int *status );
+*     acsSpecClose( const AstFitsChan * fits, int *status );
 
 *  Language:
 *     Starlink ANSI C
@@ -931,7 +931,7 @@ hdsSpecWrite( size_t nchan, const float spectrum[], const ACSISRecord* record,
 *        Original version.
 
 *  Notes:
-*     - Must have previously called hdsSpecOpen.
+*     - Must have previously called acsSpecOpen.
 
 *  Copyright:
 *     Copyright (C) 2006 Particle Physics and Astronomy Research Council.
@@ -957,7 +957,7 @@ hdsSpecWrite( size_t nchan, const float spectrum[], const ACSISRecord* record,
 */
 
 void
-hdsSpecClose( const AstFitsChan * fits, int * status ) {
+acsSpecClose( const AstFitsChan * fits, int * status ) {
 
   unsigned int i;           /* Loop counter */
   int itemp;                /* Temp integer */
@@ -975,7 +975,7 @@ hdsSpecClose( const AstFitsChan * fits, int * status ) {
   if (locator == NULL) {
     *status = SAI__ERROR;
     errRep( "HDS_SPEC_WRITE_ERR0",
-	    "No file is open. Has hdsSpecOpen been called?", status );
+	    "No file is open. Has acsSpecOpen been called?", status );
     return;
   }
 
@@ -1113,7 +1113,7 @@ openHDSContainer( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
   if (locator != NULL) {
     *status = SAI__ERROR;
     errRep("HDS_SPEC_OPEN_ERR0",
-	   "hdsSpecOpen called, yet an HDS file is already open", status);
+	   "acsSpecOpen called, yet an HDS file is already open", status);
     return;
   }
 
@@ -1401,7 +1401,7 @@ main ( void ) {
     fits[i] = fitschan;
   }
 
-  hdsSpecOpenTS( ".", 20060607, 53, NRECEP, nsubsys, nchans, NULL, &status );
+  acsSpecOpenTS( ".", 20060607, 53, NRECEP, nsubsys, nchans, NULL, &status );
   for (i = 0; i < NSPEC; i++) {
     /* increment the sequence number every NRECEP spectra */
     if (i%NRECEP == 0) {
@@ -1410,7 +1410,7 @@ main ( void ) {
     }
     gettimeofday(&tp1, NULL);
     for (j = 0; j < nsubsys; j++) {
-      hdsSpecWriteTS(j, spectrum, &record, NULL, &status);
+      acsSpecWriteTS(j, spectrum, &record, NULL, &status);
     }
     gettimeofday(&tp2, NULL);
     diff = (tp2.tv_sec - tp1.tv_sec) +
@@ -1419,7 +1419,7 @@ main ( void ) {
       printf("Scan %d was written in %.3f seconds\n", i, diff);
     }
   }
-  hdsSpecCloseTS( fits, &status );
+  acsSpecCloseTS( fits, &status );
 
   hdsShow("LOCATORS", &status);
   hdsShow("FILES", &status);
@@ -1428,15 +1428,15 @@ main ( void ) {
 
   /* Open file */
   printf("HDS.In\n");
-  hdsSpecOpen( ".", 20060607, 52, &status );
+  acsSpecOpen( ".", 20060607, 52, &status );
 
   /* Write a spectrum */
   for (i=0; i < NSPEC; i++) {
-    hdsSpecWrite( NCHAN, spectrum, NULL, NULL, &status );
+    acsSpecWrite( NCHAN, spectrum, NULL, NULL, &status );
   }
 
   /* Close and write header */
-  hdsSpecClose( fitschan, &status );
+  acsSpecClose( fitschan, &status );
 
   /* End */
   return EXIT_SUCCESS;
