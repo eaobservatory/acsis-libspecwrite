@@ -1,3 +1,5 @@
+spwTest
+*.sdf
 .deps
 .libs
 Makefile
