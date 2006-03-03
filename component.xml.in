@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<!DOCTYPE component SYSTEM "componentinfo.dtd">
+<!-- @configure_input@ -->
+
+<component id="@PACKAGE@" support="U">
+  <version>@PACKAGE_VERSION@</version>
+  <path>libraries/acsisio</path>
+  <description>I/O routines for ACSIS data files</description>
+  <abstract><p> 
+	Collection of routines for reading and writing ACSIS format
+        data files containing collections of spectra.
+    </p></abstract>
+  <dependencies @STAR_DEPENDENCIES_ATTRIBUTES@>
+    @STAR_DEPENDENCIES_CHILDREN@
+  </dependencies>
+  <developers>
+    <person>
+      <name>Tim Jenness</name>
+      <uname>timj</uname>
+    </person>
+  </developers>
+  <documentation>@STAR_DOCUMENTATION@</documentation>
+  <bugreports>@PACKAGE_BUGREPORT@</bugreports>
+  <!-- <notes><p></p></notes> -->
+</component>

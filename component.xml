@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<!DOCTYPE component SYSTEM "componentinfo.dtd">
+<!-- component.xml.  Generated from component.xml.in by configure. -->
+
+<component id="acsisio" support="U">
+  <version>0.1-1</version>
+  <path>libraries/acsisio</path>
+  <description>I/O routines for ACSIS data files</description>
+  <abstract><p> 
+	Collection of routines for reading and writing ACSIS format
+        data files containing collections of spectra.
+    </p></abstract>
+  <dependencies >
+    <build>sae</build><build>ems</build><build>ndf</build><build>hds</build><build>cnf</build><link>ems</link><link>cnf</link><link>hds</link><link>ndf</link>
+  </dependencies>
+  <developers>
+    <person>
+      <name>Tim Jenness</name>
+      <uname>timj</uname>
+    </person>
+  </developers>
+  <documentation></documentation>
+  <bugreports>timj@jach.hawaii.edu</bugreports>
+  <!-- <notes><p></p></notes> -->
+</component>
