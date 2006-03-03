@@ -17,7 +17,7 @@
 #include "prm_par.h"
 
 /* Local includes */
-#include "hdsspec.h"
+#include "specwrite.h"
 
 /* Global state variables */
 
