@@ -119,23 +119,6 @@ typedef struct ACSISFreqInfo {
   double refchan;
 } ACSISFreqInfo;
 
-/* Initialise the file for writing */
-void acsSpecOpen( const char * dir,
-		  unsigned int yyyymmdd,
-		  unsigned int obsnum,
-		  int * status );
-
-/* Write a spectrum to the file */
-void acsSpecWrite( size_t nchan,
-		   const float spectrum[],
-		   const ACSISRecord * record,
-		   const ACSISFreqInfo * freq,
-		   int * status );
-
-/* Close the file */
-void acsSpecClose( const AstFitsChan * fits,
-		   int * status );
-
 /* NDF versions of the Spectrum writing */
 
 /* Initialise the file for writing */
