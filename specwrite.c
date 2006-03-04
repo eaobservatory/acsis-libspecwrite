@@ -224,6 +224,7 @@ static void * extdata[MAXSUBSYS][NEXTENSIONS];
 *     acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, 
 *                    unsigned int obsnum, unsigned int nrecep,
 *                    unsigned int nsubsys, const size_t nchans[], 
+*                    unsigned int nseq, const char *recepnames[],
 *                    int * status );
 
 *  Language:
@@ -248,6 +249,9 @@ static void * extdata[MAXSUBSYS][NEXTENSIONS];
 *     nchans[] = size_t (Given)
 *        Number of channels in each subsystem. Should have at least "nsubsys"
 *        elements.
+*     nseq = unsigned int (Given)
+*        Initial number of sequence steps to use to presize the data file.
+*        If 0 is given, an internal default will be used.
 *     recepnames[] = const char*[] (Given)
 *        Names of each receptor in feed order.
 *     status = int * (Given & Returned)
@@ -295,7 +299,7 @@ static void * extdata[MAXSUBSYS][NEXTENSIONS];
 void
 acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 	       unsigned int nrecep, unsigned int nsubsys, 
-	       const size_t nchans[], 
+	       const size_t nchans[], unsigned int nseq,
 	       const char *recepnames[], int * status ) {
 
   void *datapntrs[] = { NULL };/* Array of mapped pointers for ndfMap */

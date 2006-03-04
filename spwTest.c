@@ -124,7 +124,7 @@ main ( void ) {
     fits[i] = fitschan;
   }
 
-  acsSpecOpenTS( ".", 20060607, 53, NRECEP, nsubsys, nchans, NULL, &status );
+  acsSpecOpenTS( ".", 20060607, 53, NRECEP, nsubsys, nchans, 0, NULL, &status);
   for (i = 0; i < NSPEC; i++) {
     /* increment the sequence number every NRECEP spectra */
     if (i%NRECEP == 0) {

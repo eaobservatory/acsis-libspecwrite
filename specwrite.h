@@ -128,6 +128,7 @@ void acsSpecOpenTS( const char * dir,
 		    unsigned int nrecep,
 		    unsigned int nsubsys,
 		    const size_t nchans[],
+		    unsigned int nseq,
 		    const char* recepnames[],
 		    int * status );
 
