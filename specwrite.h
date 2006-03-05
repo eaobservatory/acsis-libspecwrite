@@ -62,7 +62,7 @@
 /* Public data structures */
 
 /* State structures - based on sc2head from SCUBA-2 software*/
-typedef struct ACSISRecord {
+typedef struct ACSISRtsState {
   double pol_ang;
   int    rts_num;
   double rts_step;
@@ -95,11 +95,6 @@ typedef struct ACSISRecord {
   double tcs_tr_dc2;
   double tcs_tr_bc1;
   double tcs_tr_bc2;
-  char  acs_receptor[SIZEOF_ACS_RECEPTOR+1];
-  char  acs_source_ro[SIZEOF_ACS_SOURCE_RO+1];
-  int   acs_source_rp;
-  int   acs_spec_window_id;
-  int   acs_drcontrol;
   float acs_tsys;
   float acs_trx;
   float wvm_th;
@@ -109,7 +104,12 @@ typedef struct ACSISRecord {
   float wvm_tw;
   int wvm_qual;
   float wvm_time;
-} ACSISRecord;
+  char  acs_receptor[SIZEOF_ACS_RECEPTOR+1];
+  char  acs_source_ro[SIZEOF_ACS_SOURCE_RO+1];
+  int   acs_source_rp;
+  int   acs_spec_window_id;
+  int   acs_drcontrol;
+} ACSISRtsState;
 
 /* Spectral scale */
 typedef struct ACSISFreqInfo {
@@ -135,7 +135,7 @@ void acsSpecOpenTS( const char * dir,
 /* Write a spectrum to the file */
 void acsSpecWriteTS( unsigned int subsys,
 		     const float spectrum[],
-		     const ACSISRecord * record,
+		     const ACSISRtsState * state,
 		     const ACSISFreqInfo * freq,
 		     int * status );
 

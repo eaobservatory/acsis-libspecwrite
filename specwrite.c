@@ -70,7 +70,7 @@ createExtensions( unsigned int subsys, unsigned int size, int * status );
 static void resizeExtensions( unsigned int subsys, unsigned int newsize, int remap, 
 			      int * status );
 static void closeExtensions( unsigned int subsys, int * status );
-static void writeRecord( unsigned int subsys, const ACSISRecord * record, 
+static void writeRecord( unsigned int subsys, const ACSISRtsState * record, 
 			 int * status );
 
 /* Largest file name allowed (including path) */
@@ -131,7 +131,7 @@ static void writeRecord( unsigned int subsys, const ACSISRecord * record,
 #define WVM_QUAL     42
 #define WVM_TIME     43  
 
-/* Definitions of HDS types associated with ACSISRecords struct. All these
+/* Definitions of HDS types associated with ACSISRtsStates struct. All these
    will be created in the file. */
 static const char * hdsRecordNames[NEXTENSIONS][2] = 
   {
@@ -208,7 +208,7 @@ static void * extdata[MAXSUBSYS][NEXTENSIONS];
    we expect in a given time period */
 #define MAXRECEP   16
 #define MAXRATE    20
-#define PRESIZETIME 10
+#define PRESIZETIME 60
 #define NGROW  (MAXRECEP * MAXRATE * PRESIZETIME)
 
 
@@ -402,7 +402,7 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 
 *  Invocation:
 *     acsSpecWriteTS( unsigned int subsys, const float spectrum[], 
-*                     const ACSISRecord * record, const ACSISFreqInfo * freq,
+*                     const ACSISRtsState * record, const ACSISFreqInfo * freq,
 *                     int *status);
 
 *  Language:
@@ -418,7 +418,7 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 *        Much match the nchans[] array given to acsSpecOpenTS.
 *     spectrum = float[nchan] (Given)
 *        Spectrum itself.
-*     record = const ACSISRecord * (Given)
+*     record = const ACSISRtsState * (Given)
 *        Header information associated with this spectrum.
 *     freq = const ACSISFreqInfo * (Given)
 *        Frequency information associated with this spectrum.
@@ -461,7 +461,7 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 
 void
 acsSpecWriteTS( unsigned int subsys, const float spectrum[], 
-		const ACSISRecord* record,
+		const ACSISRtsState* record,
 		const ACSISFreqInfo * freq, int * status ) {
 
   float * data; /* local copy of mapped pointer to spectrum */
@@ -928,9 +928,9 @@ static void closeExtensions( unsigned int subsys, int * status ) {
 
 }
 
-/* Write ACSISRecord to file */
+/* Write ACSISRtsState to file */
 
-static void writeRecord( unsigned int subsys, const ACSISRecord * record, 
+static void writeRecord( unsigned int subsys, const ACSISRtsState * record,
 			 int * status ) {
 
   unsigned int frame; /* position in data array */
