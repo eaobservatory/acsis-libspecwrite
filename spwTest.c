@@ -64,16 +64,22 @@
 /* Internal constants */
 #define SPD 86400.0   /* seconds per day */
 
-#define NSUBSYS 2
-#define NCHAN  4096
-#define NRECEP  16
-/* in Hertz */
-#define DUMPRATE 20
+#define NSUBSYS 1     /* number of subsystems */
+#define NCHAN   8192   /* number of channels */
+#define NRECEP  16    /* Number of receptors */
+#define DUMPRATE 20   /* in Hertz */
 
-/* Duration of the observation (seconds) */
-#define OBSLENGTH 60
 
-#define NSPEC ( OBSLENGTH * NRECEP * DUMPRATE )
+#define OBSLENGTH 20 /* Duration of the observation (seconds) */
+
+/* Number of sequence steps in observation and the total number
+   of spectra to write */
+#define NSEQ  ( OBSLENGTH * DUMPRATE )
+#define NSPEC ( NSEQ * NRECEP * NSUBSYS )
+
+/* data rate in MBps */
+#define DATARATE ( DUMPRATE * NRECEP * NSUBSYS * NCHAN * 4 / (1024 * 1024) )
+
 
 void MAIN_ ( void ) { };
 
@@ -87,7 +93,7 @@ main ( void ) {
   int i,j;
   float spectrum[NCHAN];
   size_t nchans[NSUBSYS];
-  ACSISRecord record;
+  ACSISRtsState record;
   double step_time_in_days;
   struct timeval tp1;
   struct timeval tp2;
@@ -106,6 +112,8 @@ main ( void ) {
   astSetFitsS( fitschan, "TELESCOP", "JCMT", "Telescope", 0 );
   astShow( fitschan );
 
+  printf("Required data rate: %d MB/s\n", DATARATE );
+  printf("Number of sequence steps: %d\n", NSEQ );
   printf("HDS TS cube. Writing %d spectra over %d seconds\n", (int)NSPEC, (int)OBSLENGTH);
 
   /* intialise the record */
@@ -147,7 +155,11 @@ main ( void ) {
   hdsShow("LOCATORS", &status);
   hdsShow("FILES", &status);
 
-  return EXIT_SUCCESS;
+  if (status == SAI__OK) {
+    return EXIT_SUCCESS;
+  } else {
+    return EXIT_FAILURE;
+  }
 }
 
 
