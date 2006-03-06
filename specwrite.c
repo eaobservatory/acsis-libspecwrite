@@ -19,6 +19,8 @@
 /* Local includes */
 #include "specwrite.h"
 
+#define SPW_DEBUG 1
+
 /* Global state variables */
 
 /* Locator of the root HDS container file */
@@ -208,7 +210,7 @@ static void * extdata[MAXSUBSYS][NEXTENSIONS];
    we expect in a given time period */
 #define MAXRECEP   16
 #define MAXRATE    20
-#define PRESIZETIME 60
+#define PRESIZETIME 10
 #define NGROW  (MAXRECEP * MAXRATE * PRESIZETIME)
 
 
@@ -321,7 +323,7 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
     *status = SAI__ERROR;
     emsSeti("NIN", nsubsys);
     emsSeti("MAX", maxsubsys);
-    errRep("HDS_SPEC_OPENTS_ERR0",
+    emsRep("HDS_SPEC_OPENTS_ERR0",
 	   "acsSpecOpenTS: number of subsystems supplied (^NIN) exceeds expected maximum of ^MAX", status);
     return;
   }
@@ -331,7 +333,7 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
     if (indf[i] != NDF__NOID) {
       *status = SAI__ERROR;
       emsSeti("I", i);
-      errRep("HDS_SPEC_OPENTS_ERR1",
+      emsRep("HDS_SPEC_OPENTS_ERR1",
 	     "acsSpecOpenTS called, yet an NDF file is already open (subsystem ^I)",
 	     status);
       return;
@@ -344,14 +346,15 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
   /* Need an NDF per subsystem */
   for (i = 0; i < nsubsys; i++) {
 
+#if SPW_DEBUG
     printf("Opening subsystem %d\n",i);
-
+#endif
     /* Name the NDF component */
     nlen = snprintf(ndfname, DAT__SZNAM+1, "SUBSYS%u", i );
 
     if (nlen > DAT__SZNAM) {
       *status = SAI__ERROR;
-      errRep("HDS_SPEC_OPENTS_ERR2",
+      emsRep("HDS_SPEC_OPENTS_ERR2",
 	     "Buffer overflow when forming NDF component name", status);
       return;
     }
@@ -478,7 +481,7 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
     *status = SAI__ERROR;
     emsSeti("IN", subsys);
     emsSeti("MAX", maxsubsys-1);
-    errRep(" ","acsSpecWriteTS: Supplied subsystem number (^IN) exceeds max allowed (^MAX)", status);
+    emsRep(" ","acsSpecWriteTS: Supplied subsystem number (^IN) exceeds max allowed (^MAX)", status);
     return;
   }
 
@@ -487,7 +490,7 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
   if (indf[subsys] == NDF__NOID) {
     *status = SAI__ERROR;
     emsSeti("I", subsys);
-    errRep(" ",
+    emsRep(" ",
 	   "acsSpecWriteTS called, yet an NDF file has not been opened (subsystem ^I)",
 	   status);
     return;
@@ -504,6 +507,9 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
     /* resize NDF and all data arrays */
 
     /* Unmap the data array */
+#if SPW_DEBUG
+    printf("Unmap data array in preparation for resize\n");
+#endif
     ndfUnmap(indf[subsys], "DATA", status );
 
     /* Get the existing bounds */
@@ -512,7 +518,7 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
     if (*status == SAI__OK && itemp != 2) {
       *status = SAI__ERROR;
       emsSeti("N", itemp);
-      errRep(" ", "acsSpecWriteTS: Bizarre internal error. Ndims is ^N not 2",
+      emsRep(" ", "acsSpecWriteTS: Bizarre internal error. Ndims is ^N not 2",
 	     status);
     }
     
@@ -520,7 +526,7 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
       *status = SAI__ERROR;
       emsSeti("UB", ubnd[0]);
       emsSeti("NC", nchans_per_subsys[subsys] );
-      errRep(" ", "acsSpecWriteTS: Bizzare internal error. Nchans is ^UB not ^NC",
+      emsRep(" ", "acsSpecWriteTS: Bizzare internal error. Nchans is ^UB not ^NC",
 	     status);
     }
 
@@ -528,9 +534,15 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
     ubnd[1] += NGROW;
 
     /* set new bounds */
+#if SPW_DEBUG
+    printf("Setting new bounds. Grow to %lld spectra\n", (unsigned long long)ubnd[1]);
+#endif
     ndfSbnd( 2, lbnd, ubnd, indf[subsys], status );
 
     /* map data array again */
+#if SPW_DEBUG
+    printf("Remap the data array\n");
+#endif
     ndfMap( indf[subsys], "DATA", "_REAL", "WRITE", datapntrs, &itemp, status );
     spectra[subsys] = datapntrs[0];
 
@@ -634,7 +646,7 @@ acsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
   /* Is the file opened? */
   if (locator == NULL) {
     *status = SAI__ERROR;
-    errRep( " ",
+    emsRep( " ",
 	    "acsSpecCloseTS: No file is open. Has acsSpecOpen been called?", status );
     return;
   }
@@ -646,11 +658,17 @@ acsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
       found = 1;
 
       /* Unmap */
+#if SPW_DEBUG
+      printf("Unmap current NDF final time\n");
+#endif
       ndfUnmap( indf[i], "DATA", status );
 
       /* Shrink file to actual size */
       ndfBound(indf[i], 2, lbnd, ubnd, &itemp, status );
       ubnd[1] = counters[i];
+#if SPW_DEBUG
+      printf("Setting final bounds. Resize to %lld spectra\n", (unsigned long long)ubnd[1]);
+#endif
       ndfSbnd(2, lbnd, ubnd, indf[i], status );
 
       /* Close extensions */
@@ -662,8 +680,10 @@ acsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
       /* Close file */
       ndfAnnul( &(indf[i]), status );
 
+#if SPW_DEBUG
       printf("Wrote %d spectra to subsystem %d (max was %d)\n", counters[i], i,
 	     cursize[i]);
+#endif
 
     }
   }
@@ -671,7 +691,7 @@ acsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
   /* report error if not found any open NDFs */
   if (*status == SAI__OK && !found) {
     *status = SAI__ERROR;
-    errRep(" ", "acsSpecCloseTS: Failed to find open NDF components", status );
+    emsRep(" ", "acsSpecCloseTS: Failed to find open NDF components", status );
   }
 
   /* Close the file */
@@ -766,7 +786,7 @@ static char * getFileName( const char * dir, unsigned int yyyymmdd,
     emsSeti("SZ", MAXFILE );
     emsSeti("N", obsnum );
     emsSeti("UT", yyyymmdd );
-    errRep("HDS_SPEC_OPEN_ERR1",
+    emsRep("HDS_SPEC_OPEN_ERR1",
 	   "Error forming filename. Exceeded buffer size of ^SZ chars for scan ^N on UT ^UT", status );
     return NULL;
   }
@@ -791,7 +811,7 @@ openHDSContainer( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
   /* Check to see if we've already been called */
   if (locator != NULL) {
     *status = SAI__ERROR;
-    errRep("HDS_SPEC_OPEN_ERR0",
+    emsRep("HDS_SPEC_OPEN_ERR0",
 	   "acsSpecOpen called, yet an HDS file is already open", status);
     return;
   }
@@ -829,7 +849,7 @@ createExtensions( unsigned int subsys, unsigned int size, int * status ) {
 
   if (extmapped[subsys]) {
     *status = SAI__ERROR;
-    errRep(" ", "createExtensions: Attempting to create extensions that are already mapped", status );
+    emsRep(" ", "createExtensions: Attempting to create extensions that are already mapped", status );
     return;
   }
 
