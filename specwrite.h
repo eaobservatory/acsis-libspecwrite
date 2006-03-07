@@ -104,6 +104,7 @@ typedef struct ACSISRtsState {
   float wvm_tw;
   int wvm_qual;
   float wvm_time;
+  int   acs_feed;
   char  acs_receptor[SIZEOF_ACS_RECEPTOR+1];
   char  acs_source_ro[SIZEOF_ACS_SOURCE_RO+1];
   int   acs_source_rp;
