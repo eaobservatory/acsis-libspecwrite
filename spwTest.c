@@ -98,6 +98,8 @@ main ( void ) {
   struct timeval tp1;
   struct timeval tp2;
   double diff;
+  unsigned int c;
+  unsigned int seq;
 
   hdsTune("64BIT", 1, &status );
 
@@ -132,22 +134,28 @@ main ( void ) {
     fits[i] = fitschan;
   }
 
-  acsSpecOpenTS( ".", 20060607, 53, NRECEP, nsubsys, nchans, 0, NULL, &status);
-  for (i = 0; i < NSPEC; i++) {
-    /* increment the sequence number every NRECEP spectra */
-    if (i%NRECEP == 0) {
-      record.rts_num ++;
-      record.rts_end += step_time_in_days;
-    }
-    gettimeofday(&tp1, NULL);
-    for (j = 0; j < nsubsys; j++) {
-      acsSpecWriteTS(j, spectrum, &record, NULL, &status);
-    }
-    gettimeofday(&tp2, NULL);
-    diff = (tp2.tv_sec - tp1.tv_sec) +
-      (tp2.tv_usec - tp1.tv_usec ) / 1E6;
-    if ( diff > 0.5 ) {
-      printf("Scan %d was written in %.3f seconds\n", i, diff);
+  acsSpecOpenTS( ".", 20060607, 53, NRECEP, nsubsys, nchans, NSEQ, NULL, &status);
+  c = 0;
+  for (seq = 0; seq < NSEQ; seq++) {
+    /* Increment sequence number in record */
+    record.rts_num ++;
+    record.rts_end += step_time_in_days;
+    for (i = 1; i <= NRECEP; i++) {
+      record.acs_feed = i;
+
+      for (j = 0; j < nsubsys; j++) {
+	gettimeofday(&tp1, NULL);
+	c++;
+	acsSpecWriteTS(j, spectrum, &record, NULL, &status);
+	gettimeofday(&tp2, NULL);
+	diff = (tp2.tv_sec - tp1.tv_sec) +
+	  (tp2.tv_usec - tp1.tv_usec ) / 1E6;
+	if ( diff > 0.5 ) {
+	  printf("Scan %d was written in %.3f seconds\n", c, diff);
+	}
+
+      }
+
     }
   }
   acsSpecCloseTS( fits, &status );
