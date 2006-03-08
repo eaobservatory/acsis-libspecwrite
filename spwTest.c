@@ -53,6 +53,7 @@
 
 /* Starlink includes */
 #include "ast.h"
+#include "ems.h"
 #include "prm_par.h"
 #include "sae_par.h"
 #include "star/hds.h"
@@ -70,7 +71,7 @@
 #define DUMPRATE 20   /* in Hertz */
 
 
-#define OBSLENGTH 20 /* Duration of the observation (seconds) */
+#define OBSLENGTH 60 /* Duration of the observation (seconds) */
 
 /* Number of sequence steps in observation and the total number
    of spectra to write */
@@ -79,6 +80,25 @@
 
 /* data rate in MBps */
 #define DATARATE ( DUMPRATE * NRECEP * NSUBSYS * NCHAN * 4 / (1024 * 1024) )
+
+/* names of receptors */
+static const char *recepnames[] = { "H01",
+				    "H02",
+				    "H03",
+				    "H04",
+				    "H05",
+				    "H06",
+				    "H07",
+				    "H08",
+				    "H09",
+				    "H10",
+				    "H11",
+				    "H12",
+				    "H13",
+				    "H14",
+				    "H15",
+				    "H16",
+};
 
 static double duration ( struct timeval * tp1, struct timeval * tp2, int * status );
 
@@ -102,6 +122,9 @@ main ( void ) {
   double diff;
   unsigned int c;
   unsigned int seq;
+  int exstat;
+
+  emsBegin( &status );
 
   hdsTune("64BIT", 1, &status );
 
@@ -136,7 +159,7 @@ main ( void ) {
     fits[i] = fitschan;
   }
 
-  acsSpecOpenTS( ".", 20060607, 53, NRECEP, nsubsys, nchans, NSEQ, NULL, &status);
+  acsSpecOpenTS( ".", 20060607, 53, NRECEP, nsubsys, nchans, (NSEQ/10), recepnames, &status);
   c = 0;
   for (seq = 0; seq < NSEQ; seq++) {
     /* Increment sequence number in record */
@@ -174,10 +197,15 @@ main ( void ) {
   hdsShow("FILES", &status);
 
   if (status == SAI__OK) {
-    return EXIT_SUCCESS;
+    exstat = EXIT_SUCCESS;
   } else {
-    return EXIT_FAILURE;
+    printf("Status = %d\n", status);
+    exstat = EXIT_FAILURE;
   }
+
+  emsEnd( &status );
+
+  return exstat;
 }
 
 
