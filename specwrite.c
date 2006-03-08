@@ -44,7 +44,7 @@ static unsigned int curseq[MAXSUBSYS] = { 0,0,0,0 };
 static unsigned int counters[MAXSUBSYS] = { 0, 0, 0, 0 };
 
 /* Current size of NDF for each subsystem */
-static int cursize[MAXSUBSYS] = { 0, 0, 0, 0 };
+static unsigned int cursize[MAXSUBSYS] = { 0, 0, 0, 0 };
 
 /* Number of channels expected for each subsystem */
 static unsigned int nchans_per_subsys[MAXSUBSYS] = { 0, 0, 0, 0 };
@@ -71,9 +71,17 @@ static void openHDSContainer( const char * dir, unsigned int yyyymmdd,
 static void
 createExtensions( unsigned int subsys, unsigned int size, int * status );
 
+static void
+createACSISExtensions( unsigned int subsys, unsigned int size, unsigned int nrecep, 
+		       const char *recepnames[], int * status );
+
 static void resizeExtensions( unsigned int subsys, unsigned int newsize, int remap, 
 			      int * status );
+static void resizeACSISExtensions( unsigned int subsys, unsigned int newsize, int remap, 
+			      int * status );
 static void closeExtensions( unsigned int subsys, int * status );
+static void closeACSISExtensions( unsigned int subsys, int * status );
+
 static void writeRecord( unsigned int subsys, const ACSISRtsState * record, 
 			 int * status );
 
@@ -87,7 +95,7 @@ static void writeRecord( unsigned int subsys, const ACSISRtsState * record,
 #define CHARTYP(s) "_CHAR*" myxstr(s)
 
 /* Define the number of extensions we support */
-#define NEXTENSIONS 44
+#define NEXTENSIONS 43
 
 /* Number of dimensions in output NDF */
 #define NDIMS 3
@@ -129,19 +137,18 @@ static void writeRecord( unsigned int subsys, const ACSISRtsState * record,
 #define TCS_TR_DC2   28
 #define TCS_TR_BC1   29
 #define TCS_TR_BC2   30
-#define ACS_RECEPTOR     31
-#define ACS_SOURCE_RO    32
-#define ACS_SOURCE_RP    33
-#define ACS_DRCONTROL    34
-#define ACS_TSYS         35
-#define ACS_TRX          36
-#define WVM_TH       37
-#define WVM_T12      38
-#define WVM_T42      39
-#define WVM_T78      40
-#define WVM_TW       41
-#define WVM_QUAL     42
-#define WVM_TIME     43  
+#define ACS_SOURCE_RO    31
+#define ACS_SOURCE_RP    32
+#define ACS_DRCONTROL    33
+#define ACS_TSYS         34
+#define ACS_TRX          35
+#define WVM_TH       36
+#define WVM_T12      37
+#define WVM_T42      38
+#define WVM_T78      39
+#define WVM_TW       40
+#define WVM_QUAL     41
+#define WVM_TIME     42  
 
 /* Definitions of HDS types associated with ACSISRtsStates struct. All these
    will be created in the file. */
@@ -178,7 +185,6 @@ static const char * hdsRecordNames[NEXTENSIONS][2] =
    { "_DOUBLE", "TCS_TR_DC2" },
    { "_DOUBLE", "TCS_TR_BC1" },
    { "_DOUBLE", "TCS_TR_BC2" },
-   { CHARTYP(SIZEOF_ACS_RECEPTOR), "ACS_RECEPTOR" },
    { CHARTYP(SIZEOF_ACS_SOURCE_RO), "ACS_SOURCE_RO" },
    { "_INTEGER", "ACS_SOURCE_RP" },
    { "_INTEGER", "ACS_DRCONTROL" },
@@ -195,15 +201,20 @@ static const char * hdsRecordNames[NEXTENSIONS][2] =
 
 /* Extension support */
 
-/* Name of extension - could almost be shared with SCUBA2... */
+/* Name of STATE extension - could almost be shared with SCUBA2... */
 static char extname[] = "JCMTSTATE";
 static char exttype[] = "RTS_ARR";
 
-/* Locator to extension */
+#define ACSISEXT   "ACSIS"
+#define ACSISEXTTYP "ACSIS_COMP"
+
+/* Locator to extensions */
 static HDSLoc * extloc[MAXSUBSYS] = { NULL, NULL, NULL, NULL };
+static HDSLoc * acsisloc[MAXSUBSYS] = { NULL, NULL, NULL, NULL };
 
 /* Flag to indicate that extensions are mapped */
 static int extmapped[MAXSUBSYS] = { 0, 0, 0, 0 };
+static int acsismapped[MAXSUBSYS] = { 0, 0, 0, 0 };
 
 /* Array of HDS locators to each of the extensions - different for each
  subsystem. */
@@ -211,6 +222,13 @@ static HDSLoc* extlocators[MAXSUBSYS][NEXTENSIONS];
 
 /* Array of pointers to the mapped extensions */
 static void * extdata[MAXSUBSYS][NEXTENSIONS];
+
+/* HDS locator to RECEPPOS extension */
+static HDSLoc* receppos_loc[MAXSUBSYS] = { NULL, NULL, NULL, NULL };
+
+/* pointer to mapped RECEPPOS extension */
+static double * receppos_data[MAXSUBSYS] = { NULL, NULL, NULL, NULL };
+
 
 /*********************** NDF "cube" FILE *************************************/
 
@@ -332,8 +350,8 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
   /* Validate the subsystem count */
   if (nsubsys > maxsubsys) {
     *status = SAI__ERROR;
-    emsSeti("NIN", nsubsys);
-    emsSeti("MAX", maxsubsys);
+    emsSetu("NIN", nsubsys);
+    emsSetu("MAX", maxsubsys);
     emsRep("HDS_SPEC_OPENTS_ERR0",
 	   "acsSpecOpenTS: number of subsystems supplied (^NIN) exceeds expected maximum of ^MAX", status);
     return;
@@ -343,7 +361,7 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
   for (i = 0; i < nsubsys; i++) {
     if (indf[i] != NDF__NOID) {
       *status = SAI__ERROR;
-      emsSeti("I", i);
+      emsSetu("I", i);
       emsRep("HDS_SPEC_OPENTS_ERR1",
 	     "acsSpecOpenTS called, yet an NDF file is already open (subsystem ^I)",
 	     status);
@@ -406,7 +424,7 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 
     /* Create the ACSIS extension that contains the receptor names and
        positions */
-    /*    createACSISExtensions( i, ngrow, nrecep, recepnames, status );*/
+    createACSISExtensions( i, ngrow, nrecep, recepnames, status );
 
     /* Also need to create the header arrays and map those ! */
     createExtensions( i, ngrow, status );
@@ -498,13 +516,15 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
   unsigned int offset;         /* offset into data array */
   int seqinc = 0;              /* did we increment sequence number? */
   unsigned long newt;          /* New time value */
+  unsigned int nchans;         /* number of channels from bounds */
+  unsigned int nreceps;        /* number of receptors from bounds */
 
   if (*status != SAI__OK) return;
 
   /* make sure that the subsys number is in range */
   if ( subsys >= maxsubsys ) {
     *status = SAI__ERROR;
-    emsSeti("IN", subsys);
+    emsSetu("IN", subsys);
     emsSeti("MAX", maxsubsys-1);
     emsRep(" ","acsSpecWriteTS: Supplied subsystem number (^IN) exceeds max allowed (^MAX)", status);
     return;
@@ -514,7 +534,7 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
   /* Check to see if we've already been called */
   if (indf[subsys] == NDF__NOID) {
     *status = SAI__ERROR;
-    emsSeti("I", subsys);
+    emsSetu("I", subsys);
     emsRep(" ",
 	   "acsSpecWriteTS called, yet an NDF file has not been opened (subsystem ^I)",
 	   status);
@@ -559,18 +579,20 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
 	       status);
       }
     
-      if (*status == SAI__OK && ubnd[CHANDIM] != nchans_per_subsys[subsys]) {
+      nchans = ubnd[CHANDIM] - lbnd[CHANDIM] + 1;
+      if (*status == SAI__OK && nchans != nchans_per_subsys[subsys]) {
 	*status = SAI__ERROR;
-	emsSeti("UB", ubnd[CHANDIM]);
-	emsSeti("NC", nchans_per_subsys[subsys] );
+	emsSetu("UB", nchans);
+	emsSetu("NC", nchans_per_subsys[subsys] );
 	emsRep(" ", "acsSpecWriteTS: Bizzare internal error. Nchans is ^UB not ^NC",
 	       status);
       }
 
-      if (*status == SAI__OK && ubnd[RECDIM] != nreceps_per_obs) {
+      nreceps = ubnd[RECDIM] - lbnd[RECDIM] + 1;
+      if (*status == SAI__OK && nreceps != nreceps_per_obs) {
 	*status = SAI__ERROR;
-	emsSeti("UB", ubnd[RECDIM]);
-	emsSeti("NR", nreceps_per_obs);
+	emsSetu("UB", nreceps);
+	emsSetu("NR", nreceps_per_obs);
 	emsRep(" ", "acsSpecWriteTS: Bizzare internal error. Nreceptors is ^UB not ^NR",
 	       status);
       }
@@ -594,6 +616,7 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
 
       /* Resize the extensions */
       resizeExtensions( subsys, newt, 1, status  );
+      resizeACSISExtensions( subsys, newt, 1, status  );
 
       /* Update cursize */
       cursize[subsys] = newt;
@@ -719,6 +742,7 @@ acsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
 
       /* Close extensions */
       closeExtensions( i, status );
+      closeACSISExtensions( i, status );
 
       /* FITS header */
       writeFitsChan( indf[i], fits[i], status );
@@ -767,10 +791,11 @@ static void writeFitsChan( int indf, const AstFitsChan * fits, int * status ) {
   char card[81];            /* A single FITS header card */
   HDSLoc * fitsloc = NULL;  /* Locator to FITS extension */
   char * fpntr;             /* Pointer to mapped FITS header */
-  int i;                    /* Loop counter */
-  int ncards;               /* Number of header cards */
+  unsigned int i;           /* Loop counter */
+  unsigned int ncards;      /* Number of header cards */
   size_t nchars;            /* Actual size of FITS extension */
   int result;               /* Result from astFindFits */
+  int extdims[1];
 
   if (*status != SAI__OK) return;
 
@@ -781,7 +806,8 @@ static void writeFitsChan( int indf, const AstFitsChan * fits, int * status ) {
   astClear( fits, "Card" );
     
   /* Create FITS extension */
-  ndfXnew(indf, "FITS", "_CHAR*80", 1, &ncards, &fitsloc, status );
+  extdims[0] = ncards;
+  ndfXnew(indf, "FITS", "_CHAR*80", 1, extdims, &fitsloc, status );
 
   /* Loop over all cards, inserting into extension */
   datMapV( fitsloc, "_CHAR*80", "WRITE", (void**)&fpntr, &nchars, status );
@@ -789,8 +815,8 @@ static void writeFitsChan( int indf, const AstFitsChan * fits, int * status ) {
   if (*status == SAI__OK) {
     if ( ncards != nchars ) {
       *status = SAI__ERROR;
-      emsSeti( "DM", nchars );
-      emsSeti( "SZ",  ncards );
+      emsSetu( "DM", nchars );
+      emsSetu( "SZ",  ncards );
       emsRep("HDS_SPEC_CLOSE_ERR2",
 	     "Bizarre error whereby number of cards in mapped FITS header (^DM) differs from number requested (^SZ)", status );
     }
@@ -812,6 +838,8 @@ static void writeFitsChan( int indf, const AstFitsChan * fits, int * status ) {
   datUnmap( fitsloc, status );
   datAnnul( &fitsloc, status );
 
+  if (*status != SAI__OK)
+    emsRep(" ", "Error writing FITS information.", status );
 }
 
 /* Form the file name
@@ -830,8 +858,8 @@ static char * getFileName( const char * dir, unsigned int yyyymmdd,
   if (flen >= MAXFILE) {
     *status = SAI__ERROR;
     emsSeti("SZ", MAXFILE );
-    emsSeti("N", obsnum );
-    emsSeti("UT", yyyymmdd );
+    emsSetu("N", obsnum );
+    emsSetu("UT", yyyymmdd );
     emsRep("HDS_SPEC_OPEN_ERR1",
 	   "Error forming filename. Exceeded buffer size of ^SZ chars for scan ^N on UT ^UT", status );
     return NULL;
@@ -873,6 +901,9 @@ openHDSContainer( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
     return;
   }
 
+  if (*status != SAI__OK)
+    emsRep(" ", "Error openinng HDS container file", status );
+
   /* Complete */
   return;
 
@@ -910,10 +941,8 @@ createExtensions( unsigned int subsys, unsigned int size, int * status ) {
     extlocators[subsys][j] = NULL;
     datNew( extloc[subsys], hdsRecordNames[j][1], hdsRecordNames[j][0],
 	    ndim, dim, status );
-    if ( *status != SAI__OK ) break;
 
     datFind( extloc[subsys], hdsRecordNames[j][1], &(extlocators[subsys][j]), status );
-    if ( *status != SAI__OK ) break;
 
     datMap( extlocators[subsys][j], hdsRecordNames[j][0], "WRITE",
 	    ndim, dim, &(extdata[subsys][j]), status );
@@ -922,6 +951,9 @@ createExtensions( unsigned int subsys, unsigned int size, int * status ) {
   }
 
   if (*status == SAI__OK) extmapped[subsys] = 1;
+
+  if (*status != SAI__OK)
+    emsRep(" ", "Error creating JCMT state extension", status );
 
 }
 
@@ -969,6 +1001,9 @@ resizeExtensions( unsigned int subsys, unsigned int newsize,
     }
   }
 
+  if (*status != SAI__OK)
+    emsRep(" ", "Error resizing JCMT state extension", status );
+
 }
 
 /* Close down the extensions and free resources */
@@ -990,8 +1025,10 @@ static void closeExtensions( unsigned int subsys, int * status ) {
   datAnnul( &(extloc[subsys]), status );
 
   /* indicate that we are closed down */
-  if (*status == SAI__OK) extmapped[subsys] = 0;
+  extmapped[subsys] = 0;
 
+  if (*status != SAI__OK)
+    emsRep(" ", "Error closing JCMT state extension", status );
 }
 
 /* Write ACSISRtsState to file */
@@ -1054,10 +1091,6 @@ static void writeRecord( unsigned int subsys, const ACSISRtsState * record,
   ((double *)extdata[subsys][TCS_TR_BC1])[frame] = record->tcs_tr_bc1;
   ((double *)extdata[subsys][TCS_TR_BC2])[frame] = record->tcs_tr_bc2;
 
-  cnfExprt( record->acs_receptor,
-	    (char*)extdata[subsys][ACS_RECEPTOR]+ SIZEOF_ACS_RECEPTOR*frame,
-	    SIZEOF_ACS_RECEPTOR );
-
   cnfExprt( record->acs_source_ro,
 	    (char*)extdata[subsys][ACS_SOURCE_RO]+ SIZEOF_ACS_SOURCE_RO*frame,
 	    SIZEOF_ACS_SOURCE_RO );
@@ -1074,5 +1107,142 @@ static void writeRecord( unsigned int subsys, const ACSISRtsState * record,
   ((float *)extdata[subsys][WVM_TW])[frame] = record->wvm_tw;
   ((int *)extdata[subsys][WVM_QUAL])[frame] = record->wvm_qual;
   ((float *)extdata[subsys][WVM_TIME])[frame] = record->wvm_time;
+
+}
+
+/* Create the .MORE.ACSIS extensions (that are not JCMT state structure members) */
+
+
+static void
+createACSISExtensions( unsigned int subsys, unsigned int size, unsigned int nrecep, 
+		       const char *recepnames[], int * status ) {
+  size_t maxlen = 0;
+  size_t len;
+  unsigned int i;
+  char type[DAT__SZTYP+1];   /* constructed type string */
+  HDSLoc * temploc = NULL;
+  hdsdim dim[3];
+
+  if (*status != SAI__OK) return;
+
+  if (acsismapped[subsys]) {
+    *status = SAI__ERROR;
+    emsRep( " ", "createACSISExtensions: ACSIS extension already mapped. Can not create", status);
+    return;
+  }
+
+  /* create ACSIS extension */
+  ndfXnew( indf[subsys], ACSISEXT, ACSISEXTTYP, 0, NULL, &(acsisloc[subsys]), status );
+
+  /* Need to create the following components:
+     - RECEPTORS  _CHAR* array for each of the nrecep elements and their names. This fixed
+       once written.
+     - RECEPPOS   _DOUBLE (2 * size)   x and y positions (in tracking coordinates) for each
+       receptor. This array grows in the same way as JCMTSTATE.
+  */
+
+  /* find the longest receptor name */
+  if (recepnames != NULL) {
+    for (i=0; i < nrecep; i++) {
+      len = strlen( recepnames[i] );
+      if (maxlen < len ) maxlen = len;
+    }
+  }
+
+  /* Create the receptor component and store the names */
+  if (maxlen > 0) {
+    datCctyp( maxlen, type );
+    dim[0] = nrecep;
+    datNew( acsisloc[subsys], "RECEPTORS", type, 1, dim, status );
+    datFind( acsisloc[subsys], "RECEPTORS", &temploc, status );
+    if (recepnames != NULL) datPut1C( temploc, nrecep, recepnames, status );
+    datAnnul( &temploc, status );
+  }
+
+  /* Now create the positions array and map it */
+  dim[0] = 2;
+  dim[1] = nrecep;
+  dim[2] = size;
+  datNew( acsisloc[subsys], "RECEPPOS", "_DOUBLE", 3, dim, status );
+  datFind( acsisloc[subsys], "RECEPPOS", &(receppos_loc[subsys]), status );
+  datMapD( receppos_loc[subsys], "WRITE", 3, dim, &(receppos_data[subsys]), status );
+
+  if (*status != SAI__OK) {
+    acsismapped[subsys] = 0;
+    receppos_data[subsys] = NULL;
+  } else {
+    acsismapped[subsys] = 1;
+  }
+  
+  if (*status != SAI__OK)
+    emsRep(" ", "Error creating ACSIS extension", status );
+
+  return;
+}
+
+/*
+  Resize the ACSIS RECEPPOS extensions to the supplied value.
+  If remap is false, the arrays will not be remapped (so call at end to resize
+  before annulling locators) 
+*/
+
+static void
+resizeACSISExtensions( unsigned int subsys, unsigned int newsize, 
+		       int remap, int * status ) {
+
+  hdsdim dim[3];
+  size_t ndim = 3;
+  int actdim;
+
+  if (*status != SAI__OK) return;
+
+  dim[0] = newsize;
+
+  if (acsismapped[subsys])
+    datUnmap( receppos_loc[subsys], status );
+
+  /* Get the current bounds */
+  datShape( receppos_loc[subsys], ndim, dim, &actdim, status );
+
+  if (*status != SAI__OK && ndim != (size_t)actdim) {
+    *status = SAI__ERROR;
+    emsSeti( "AD", actdim);
+    emsSetu( "ND", (unsigned long) ndim );
+    emsRep(" ", "Dims mismatch in ACSIS extension. ^AD != ^ND", status);
+  }
+
+  /* resize */
+  dim[ndim-1] = newsize;
+  datAlter( receppos_loc[subsys], ndim, dim, status);
+
+  if (remap) {
+    /* remap - assume this should be done after resizing all */
+    datMapD( receppos_loc[subsys], "WRITE",
+	     ndim, dim, &(receppos_data[subsys]), status );
+  }
+
+  if (*status != SAI__OK)
+    emsRep(" ", "Error resizing ACSIS extension", status );
+
+}
+
+/* Close down the ACSIS extension and free resources */
+
+static void closeACSISExtensions( unsigned int subsys, int * status ) {
+
+  if ( *status != SAI__OK ) return;
+
+  resizeACSISExtensions( subsys, counters[subsys], 0, status );
+
+  /* Free locators */
+  datAnnul( &(receppos_loc[subsys]), status );
+
+  /* Close extension */
+  datAnnul( &(acsisloc[subsys]), status );
+
+  acsismapped[subsys] = 0;
+
+  if (*status != SAI__OK)
+    emsRep(" ", "Error closing ACSIS extension", status );
 
 }

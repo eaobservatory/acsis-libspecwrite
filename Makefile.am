@@ -16,7 +16,8 @@ TESTS = spwTest
 check_PROGRAMS = spwTest
 
 spwTest_SOURCES = spwTest.c
-spwTest_LDADD = libacsisio.la `one_link` `ndf_link` @FCLIBS@
+spwTest_LDADD = libacsisio.la `one_link` `ndf_link` @FCLIBS@ 
+spwTest_LDFLAGS = -framework CoreFoundation
 
 
  
