@@ -34,13 +34,13 @@ static HDSLoc * locator = NULL;
 #define MAXSUBSYS 4
 const unsigned int maxsubsys = MAXSUBSYS;
 
-/* Current spectrum counter - increment *after* writing a new spectrum.
-   Scalar is used for HDS .I1, .I2 writing.
-   Array is used for multi-subsystem time series NDFs.
+/* Current sequence number (so that we know when we need to increment the time axis "counters")
+   Note that the sequence number will not be sequential and will not start at zero. It will
+   just guarantee to be at least the same as the previous value (for multi-receptor observations).
 */
-static unsigned int counter = 1;
+static unsigned int curseq[MAXSUBSYS] = { 0,0,0,0 };
 
-/* Position to write next spectrum - C indexing */
+/* t- Position to write next spectrum - Fortran indexing */
 static unsigned int counters[MAXSUBSYS] = { 0, 0, 0, 0 };
 
 /* Current size of NDF for each subsystem */
@@ -48,6 +48,9 @@ static int cursize[MAXSUBSYS] = { 0, 0, 0, 0 };
 
 /* Number of channels expected for each subsystem */
 static unsigned int nchans_per_subsys[MAXSUBSYS] = { 0, 0, 0, 0 };
+
+/* Number of receptors in this particular observation */
+static unsigned int nreceps_per_obs = 0;
 
 /* Pointer into mapped data array for each subsystem */
 static float * spectra[MAXSUBSYS] = { NULL, NULL, NULL, NULL };
@@ -58,7 +61,6 @@ static AstFrameSet* frameset_cache[MAXSUBSYS] = { NULL, NULL, NULL, NULL };
 
 /* NDF identifier of spectrum file (if used). One NDF per subsystem. */
 static int indf[MAXSUBSYS] = { NDF__NOID, NDF__NOID, NDF__NOID, NDF__NOID };
-
 
 /* internal prototypes */
 static void writeFitsChan( int indf, const AstFitsChan * fitschan, int * status );
@@ -86,6 +88,14 @@ static void writeRecord( unsigned int subsys, const ACSISRtsState * record,
 
 /* Define the number of extensions we support */
 #define NEXTENSIONS 44
+
+/* Number of dimensions in output NDF */
+#define NDIMS 3
+
+/* definitions of dimensions */
+#define CHANDIM 0
+#define RECDIM  1
+#define TDIM    2
 
 /* Define indices for array of mapped pointers to extensions */
 #define POL_ANG      0
@@ -204,14 +214,14 @@ static void * extdata[MAXSUBSYS][NEXTENSIONS];
 
 /*********************** NDF "cube" FILE *************************************/
 
-/* Number of spectra to increment file size by if it runs out of space */
+/* Number of sequences to increment file size by if it runs out of space */
 
 /* May want this parameter to be settable as the number of spectra that
    we expect in a given time period */
 #define MAXRECEP   16
 #define MAXRATE    20
 #define PRESIZETIME 10
-#define NGROW  (MAXRECEP * MAXRATE * PRESIZETIME)
+#define NGROW  (MAXRATE * PRESIZETIME)
 
 
 /*
@@ -307,11 +317,12 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
   void *datapntrs[] = { NULL };/* Array of mapped pointers for ndfMap */
   unsigned int i;              /* Loop counter */
   int itemp;                   /* Temporary integer */
-  int lbnd[2];                 /* Lower pixel bounds */
+  int lbnd[NDIMS];             /* Lower pixel bounds */
   char ndfname[DAT__SZNAM+1];  /* NDF filename */
   int nlen;                    /* Number of characters in NDF component name */
   int place;                   /* NDF placeholder */
-  int ubnd[2];                 /* upper pixel bounds */
+  int ubnd[NDIMS];             /* upper pixel bounds */
+  unsigned int ngrow;          /* initial size to grow array */
 
   char * history[1] = { "ACSIS Data Acquistion" };
 
@@ -360,18 +371,26 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
     }
 
     /* Calculate bounds */
-    lbnd[0] = 1;
-    lbnd[1] = 1;
-    ubnd[0] = nchans[i];
-    ubnd[1] = NGROW;
+    ngrow = (nseq > 0 ? nseq : NGROW );
+    lbnd[RECDIM] = 1;
+    lbnd[CHANDIM] = 1;
+    lbnd[TDIM] = 1;
+    ubnd[RECDIM] = nrecep;
+    ubnd[CHANDIM] = nchans[i];
+    ubnd[TDIM] = ngrow;
+
+#if SPW_DEBUG
+    printf("Opening NDF component '%s' (length=%d) to default size of %u sequence steps\n", ndfname, nlen, ngrow);
+#endif
 
     /* create the NDF */
     ndfPlace( locator, ndfname, &place, status );
-    ndfNew( "_REAL", 2, lbnd, ubnd, &place, &(indf[i]), status );
+    ndfNew( "_REAL", NDIMS, lbnd, ubnd, &place, &(indf[i]), status );
 
     /* Update the cursize[] array and the nchans array */
-    cursize[i] = ubnd[1];
-    nchans_per_subsys[i] = nchans[i];
+    cursize[i] = ubnd[TDIM] - lbnd[TDIM] + 1;
+    nchans_per_subsys[i] = ubnd[CHANDIM] - lbnd[CHANDIM] + 1;
+    nreceps_per_obs = ubnd[RECDIM] - lbnd[RECDIM] + 1;
 
     /* History component */
     ndfHcre( indf[i], status );
@@ -385,8 +404,12 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
     /* Store the pointer */
     spectra[i] = datapntrs[0];
 
+    /* Create the ACSIS extension that contains the receptor names and
+       positions */
+    /*    createACSISExtensions( i, ngrow, nrecep, recepnames, status );*/
+
     /* Also need to create the header arrays and map those ! */
-    createExtensions( i, NGROW, status );
+    createExtensions( i, ngrow, status );
 
   }
 
@@ -470,9 +493,11 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
   float * data; /* local copy of mapped pointer to spectrum */
   void *datapntrs[] = { NULL };/* Array of mapped pointers for ndfMap */
   int itemp;                   /* Temporary integer */
-  int lbnd[2];                 /* Lower pixel bounds */
-  int ubnd[2];                 /* upper pixel bounds */
+  int lbnd[NDIMS];             /* Lower pixel bounds */
+  int ubnd[NDIMS];             /* upper pixel bounds */
   unsigned int offset;         /* offset into data array */
+  int seqinc = 0;              /* did we increment sequence number? */
+  unsigned long newt;          /* New time value */
 
   if (*status != SAI__OK) return;
 
@@ -502,71 +527,92 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
   if (counters[subsys] == 0) {
   }
 
-  /* See if we need to grow */
-  if (counters[subsys] > cursize[subsys]-1) {
-    /* resize NDF and all data arrays */
+  /* if the sequence number has incremented we need to increase the t-axis counter */
+  if (record->rts_num > curseq[subsys]) {
+    /* store the new value */
+    curseq[subsys]++;
 
-    /* Unmap the data array */
+    /* increment the counters value */
+    counters[subsys]++;
+
+    /* indicate that we did increment sequence number (and so can write header information) */
+    seqinc = 1;
+
+    /* See if we need to grow */
+    if (counters[subsys] > cursize[subsys]) {
+      /* resize NDF and all data arrays */
+
+      /* Unmap the data array */
 #if SPW_DEBUG
-    printf("Unmap data array in preparation for resize\n");
+      printf("Unmap data array in preparation for resize\n");
 #endif
-    ndfUnmap(indf[subsys], "DATA", status );
+      ndfUnmap(indf[subsys], "DATA", status );
 
-    /* Get the existing bounds */
-    ndfBound(indf[subsys], 2, lbnd, ubnd, &itemp, status );
+      /* Get the existing bounds */
+      ndfBound(indf[subsys], NDIMS, lbnd, ubnd, &itemp, status );
 
-    if (*status == SAI__OK && itemp != 2) {
-      *status = SAI__ERROR;
-      emsSeti("N", itemp);
-      emsRep(" ", "acsSpecWriteTS: Bizarre internal error. Ndims is ^N not 2",
-	     status);
-    }
+      if (*status == SAI__OK && itemp != NDIMS) {
+	*status = SAI__ERROR;
+	emsSeti("N", itemp);
+	emsSeti("ND", NDIMS);
+	emsRep(" ", "acsSpecWriteTS: Bizarre internal error. Ndims is ^N not ^ND",
+	       status);
+      }
     
-    if (*status == SAI__OK && ubnd[0] != nchans_per_subsys[subsys]) {
-      *status = SAI__ERROR;
-      emsSeti("UB", ubnd[0]);
-      emsSeti("NC", nchans_per_subsys[subsys] );
-      emsRep(" ", "acsSpecWriteTS: Bizzare internal error. Nchans is ^UB not ^NC",
-	     status);
+      if (*status == SAI__OK && ubnd[CHANDIM] != nchans_per_subsys[subsys]) {
+	*status = SAI__ERROR;
+	emsSeti("UB", ubnd[CHANDIM]);
+	emsSeti("NC", nchans_per_subsys[subsys] );
+	emsRep(" ", "acsSpecWriteTS: Bizzare internal error. Nchans is ^UB not ^NC",
+	       status);
+      }
+
+      if (*status == SAI__OK && ubnd[RECDIM] != nreceps_per_obs) {
+	*status = SAI__ERROR;
+	emsSeti("UB", ubnd[RECDIM]);
+	emsSeti("NR", nreceps_per_obs);
+	emsRep(" ", "acsSpecWriteTS: Bizzare internal error. Nreceptors is ^UB not ^NR",
+	       status);
+      }
+
+      /* increment */
+      ubnd[TDIM] += NGROW;
+      newt = ubnd[TDIM] - lbnd[TDIM] + 1;
+
+      /* set new bounds */
+#if SPW_DEBUG
+      printf("Setting new bounds. Grow to %lld sequence steps\n", (unsigned long long)ubnd[TDIM]);
+#endif
+      ndfSbnd( NDIMS, lbnd, ubnd, indf[subsys], status );
+
+      /* map data array again */
+#if SPW_DEBUG
+      printf("Remap the data array\n");
+#endif
+      ndfMap( indf[subsys], "DATA", "_REAL", "WRITE", datapntrs, &itemp, status );
+      spectra[subsys] = datapntrs[0];
+
+      /* Resize the extensions */
+      resizeExtensions( subsys, newt, 1, status  );
+
+      /* Update cursize */
+      cursize[subsys] = newt;
     }
-
-    /* increment */
-    ubnd[1] += NGROW;
-
-    /* set new bounds */
-#if SPW_DEBUG
-    printf("Setting new bounds. Grow to %lld spectra\n", (unsigned long long)ubnd[1]);
-#endif
-    ndfSbnd( 2, lbnd, ubnd, indf[subsys], status );
-
-    /* map data array again */
-#if SPW_DEBUG
-    printf("Remap the data array\n");
-#endif
-    ndfMap( indf[subsys], "DATA", "_REAL", "WRITE", datapntrs, &itemp, status );
-    spectra[subsys] = datapntrs[0];
-
-    /* Resize the extensions */
-    resizeExtensions( subsys, ubnd[1], 1, status  );
-
-    /* Update cursize */
-    cursize[subsys] = ubnd[1];
   }
 
   /* copy in the data */
   if (*status == SAI__OK) {
     
-    /* Calculate offset into array */
-    offset = nchans_per_subsys[subsys] * counters[subsys];
+    /* Calculate offset into array - number of spectra into the array times number of
+       channels per spectrum. */
+    offset = nchans_per_subsys[subsys] *
+      (nreceps_per_obs * (counters[subsys] - 1) + (record->acs_feed - 1));
 
     data = spectra[subsys];
     memcpy( &(data[offset]), spectrum, nchans_per_subsys[subsys]*sizeof(float) );
 
     /* Store record data */
-    writeRecord( subsys, record, status );
-
-    /* increment the position */
-    counters[subsys]++;
+    if (seqinc) writeRecord( subsys, record, status );
 
   }
 
@@ -637,8 +683,8 @@ acsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
   unsigned int i;           /* Loop counter */
   int found = 0;            /* Found an open NDF? */
   int itemp;                /* Temp integer */
-  int lbnd[2];              /* Lower bounds of NDF */
-  int ubnd[2];              /* upper bounds of NDF */
+  int lbnd[NDIMS];          /* Lower bounds of NDF */
+  int ubnd[NDIMS];          /* upper bounds of NDF */
 
   /* Always check status on entry */
   if (*status != SAI__OK) return;
@@ -664,12 +710,12 @@ acsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
       ndfUnmap( indf[i], "DATA", status );
 
       /* Shrink file to actual size */
-      ndfBound(indf[i], 2, lbnd, ubnd, &itemp, status );
-      ubnd[1] = counters[i];
+      ndfBound(indf[i], NDIMS, lbnd, ubnd, &itemp, status );
+      ubnd[TDIM] = counters[i];
 #if SPW_DEBUG
-      printf("Setting final bounds. Resize to %lld spectra\n", (unsigned long long)ubnd[1]);
+      printf("Setting final bounds. Resize to %lld spectra\n", (unsigned long long)ubnd[TDIM]);
 #endif
-      ndfSbnd(2, lbnd, ubnd, indf[i], status );
+      ndfSbnd(NDIMS, lbnd, ubnd, indf[i], status );
 
       /* Close extensions */
       closeExtensions( i, status );
@@ -681,7 +727,7 @@ acsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
       ndfAnnul( &(indf[i]), status );
 
 #if SPW_DEBUG
-      printf("Wrote %d spectra to subsystem %d (max was %d)\n", counters[i], i,
+      printf("Wrote %d sequence steps to subsystem %d (max was %d)\n", counters[i], i,
 	     cursize[i]);
 #endif
 
@@ -958,7 +1004,7 @@ static void writeRecord( unsigned int subsys, const ACSISRtsState * record,
   /* Can not think of anything clever to do */
   if ( *status != SAI__OK ) return;
 
-  frame = counters[subsys];
+  frame = counters[subsys] - 1;
 
   /* now copy */
   ((double *)extdata[subsys][POL_ANG])[frame] = record->pol_ang;
