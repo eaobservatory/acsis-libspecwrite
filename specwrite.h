@@ -56,7 +56,7 @@
 #define SIZEOF_TCS_AZ_SYS 16
 #define SIZEOF_TCS_SOURCE 32
 #define SIZEOF_TCS_TR_SYS 16
-#define SIZEOF_ACS_RECEPTOR   10
+#define SIZEOF_ACS_RECEPTOR   5
 #define SIZEOF_ACS_SOURCE_RO  32
 
 /* Public data structures */
@@ -65,6 +65,7 @@
 typedef struct ACSISRtsState {
   double pol_ang;
   unsigned int rts_num;
+  unsigned int rts_endnum;  /* Highest number expected in this sequence */
   double rts_step;
   double rts_end;    /* MJD TAI of end of sequence step */
   char   rts_tasks[SIZEOF_RTS_TASKS + 1];
@@ -104,11 +105,13 @@ typedef struct ACSISRtsState {
   float wvm_tw;
   int wvm_qual;
   float wvm_time;
-  int   acs_feed;
+  unsigned int acs_feed;  /* Feed number */
   char  acs_source_ro[SIZEOF_ACS_SOURCE_RO+1];
   int   acs_source_rp;
   int   acs_spec_window_id;
   int   acs_drcontrol;
+  double acs_feedx;  /* Y coordinate of feed "acs_feed" */
+  double acs_feedy;  /* Y coordinate of feed "acs_feed" */
 } ACSISRtsState;
 
 /* Spectral scale */

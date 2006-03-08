@@ -84,6 +84,7 @@ static void closeACSISExtensions( unsigned int subsys, int * status );
 
 static void writeRecord( unsigned int subsys, const ACSISRtsState * record, 
 			 int * status );
+static void writeRecepPos( unsigned int subsys, const ACSISRtsState * record, int * status );
 
 /* Largest file name allowed (including path) */
 #define MAXFILE 1024
@@ -634,8 +635,11 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
     data = spectra[subsys];
     memcpy( &(data[offset]), spectrum, nchans_per_subsys[subsys]*sizeof(float) );
 
-    /* Store record data */
+    /* Store record data and receptor positions. Base record only updates each
+       sequence step but recepot position should be written for all records. */
     if (seqinc) writeRecord( subsys, record, status );
+    writeRecepPos( subsys, record, status );
+    
 
   }
 
@@ -1037,6 +1041,7 @@ static void writeRecord( unsigned int subsys, const ACSISRtsState * record,
 			 int * status ) {
 
   unsigned int frame; /* position in data array */
+  unsigned int offset;
 
   /* Can not think of anything clever to do */
   if ( *status != SAI__OK ) return;
@@ -1244,5 +1249,27 @@ static void closeACSISExtensions( unsigned int subsys, int * status ) {
 
   if (*status != SAI__OK)
     emsRep(" ", "Error closing ACSIS extension", status );
+
+}
+
+/* Write coordinate positions to ACSIS extension */
+static void writeRecepPos( unsigned int subsys, const ACSISRtsState * record, int * status ) {
+  unsigned int offset;
+  double *posdata;
+
+  if (*status != SAI__OK) return;
+
+  /* Calculate offset into data array */
+  offset = 2 * ( (nreceps_per_obs * (counters[subsys]-1) ) + record->acs_feed - 1);
+
+  posdata = receppos_data[subsys];
+  if (posdata != NULL) {
+    posdata[offset] = record->acs_feedx;
+    posdata[offset+1] = record->acs_feedy;
+  } else {
+    *status = SAI__ERROR;
+    emsRep( " ", "Attempted to write receptor positions but no data array mapped",
+	    status );
+  }
 
 }

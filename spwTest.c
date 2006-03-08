@@ -71,7 +71,7 @@
 #define DUMPRATE 20   /* in Hertz */
 
 
-#define OBSLENGTH 60 /* Duration of the observation (seconds) */
+#define OBSLENGTH 1 /* Duration of the observation (seconds) */
 
 /* Number of sequence steps in observation and the total number
    of spectra to write */
@@ -164,9 +164,12 @@ main ( void ) {
   for (seq = 0; seq < NSEQ; seq++) {
     /* Increment sequence number in record */
     record.rts_num ++;
+    record.rts_endnum = 0;
     record.rts_end += step_time_in_days;
     for (i = 1; i <= NRECEP; i++) {
       record.acs_feed = i;
+      record.acs_feedx = 1.0;
+      record.acs_feedy = VAL__BADD;
 
       /* tweak content */
       for (j=0; j < NCHAN; j++) {
