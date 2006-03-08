@@ -56,7 +56,7 @@
 #define SIZEOF_TCS_AZ_SYS 16
 #define SIZEOF_TCS_SOURCE 32
 #define SIZEOF_TCS_TR_SYS 16
-#define SIZEOF_ACS_RECEPTOR   6
+#define SIZEOF_ACS_RECEPTOR   10
 #define SIZEOF_ACS_SOURCE_RO  32
 
 /* Public data structures */
@@ -64,7 +64,7 @@
 /* State structures - based on sc2head from SCUBA-2 software*/
 typedef struct ACSISRtsState {
   double pol_ang;
-  int    rts_num;
+  unsigned int rts_num;
   double rts_step;
   double rts_end;    /* MJD TAI of end of sequence step */
   char   rts_tasks[SIZEOF_RTS_TASKS + 1];
@@ -105,7 +105,6 @@ typedef struct ACSISRtsState {
   int wvm_qual;
   float wvm_time;
   int   acs_feed;
-  char  acs_receptor[SIZEOF_ACS_RECEPTOR+1];
   char  acs_source_ro[SIZEOF_ACS_SOURCE_RO+1];
   int   acs_source_rp;
   int   acs_spec_window_id;
