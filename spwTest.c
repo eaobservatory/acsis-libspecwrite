@@ -80,6 +80,7 @@
 /* data rate in MBps */
 #define DATARATE ( DUMPRATE * NRECEP * NSUBSYS * NCHAN * 4 / (1024 * 1024) )
 
+static double duration ( struct timeval * tp1, struct timeval * tp2, int * status );
 
 void MAIN_ ( void ) { };
 
@@ -92,6 +93,7 @@ main ( void ) {
   int status = SAI__OK;
   int i,j;
   float spectrum[NCHAN];
+  float spectrum2[NCHAN];
   size_t nchans[NSUBSYS];
   ACSISRtsState record;
   double step_time_in_days;
@@ -143,13 +145,17 @@ main ( void ) {
     for (i = 1; i <= NRECEP; i++) {
       record.acs_feed = i;
 
+      /* tweak content */
+      for (j=0; j < NCHAN; j++) {
+	spectrum2[j] = spectrum[j] + (float)i;
+      }
+
       for (j = 0; j < nsubsys; j++) {
 	gettimeofday(&tp1, NULL);
 	c++;
-	acsSpecWriteTS(j, spectrum, &record, NULL, &status);
+	acsSpecWriteTS(j, spectrum2, &record, NULL, &status);
 	gettimeofday(&tp2, NULL);
-	diff = (tp2.tv_sec - tp1.tv_sec) +
-	  (tp2.tv_usec - tp1.tv_usec ) / 1E6;
+	diff = duration( &tp1, &tp2, &status);
 	if ( diff > 0.5 ) {
 	  printf("Scan %d was written in %.3f seconds\n", c, diff);
 	}
@@ -158,7 +164,11 @@ main ( void ) {
 
     }
   }
+  gettimeofday(&tp1, NULL);
   acsSpecCloseTS( fits, &status );
+  gettimeofday(&tp2, NULL);
+  diff = duration( &tp1, &tp2, &status );
+  printf("Time to close file = %.3f seconds\n", diff);
 
   hdsShow("LOCATORS", &status);
   hdsShow("FILES", &status);
@@ -171,3 +181,13 @@ main ( void ) {
 }
 
 
+
+static double duration ( struct timeval * tp1, struct timeval * tp2, int * status ) {
+  double diff = 0.0;
+  if (*status != SAI__OK) return diff;
+
+  diff = (tp2->tv_sec - tp1->tv_sec) +
+    (tp2->tv_usec - tp1->tv_usec ) / 1E6;
+
+  return diff;
+}
