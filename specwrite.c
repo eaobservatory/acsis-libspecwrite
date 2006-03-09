@@ -519,6 +519,8 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
   unsigned long newt;          /* New time value */
   unsigned int nchans;         /* number of channels from bounds */
   unsigned int nreceps;        /* number of receptors from bounds */
+  unsigned int ngrow;          /* number of time slices to grow file */
+  unsigned int reqnum;         /* number of time slices indicates by RTS sequence */
 
   if (*status != SAI__OK) return;
 
@@ -549,9 +551,10 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
   }
 
   /* if the sequence number has incremented we need to increase the t-axis counter */
-  if (record->rts_num > curseq[subsys]) {
+
+  if ( record->rts_num > curseq[subsys] ) {
     /* store the new value */
-    curseq[subsys]++;
+    curseq[subsys] = record->rts_num;
 
     /* increment the counters value */
     counters[subsys]++;
@@ -560,7 +563,19 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
     seqinc = 1;
 
     /* See if we need to grow */
-    if (counters[subsys] > cursize[subsys]) {
+    /* We can grow either because we have suddenly realised we don't fit *or* because
+       we have been told how many sequence steps to expect - calculate the required
+       number to extend. (but we know at least 1) */
+    reqnum = 1;
+
+    if ( record->rts_endnum > record->rts_num ) {
+      reqnum = record->rts_endnum - record->rts_num + 1;
+#if SPW_DEBUG
+      printf("Required number of sequence steps at sequence %u is %u counter=%u cursize=%u\n",record->rts_num, reqnum, counters[subsys], cursize[subsys]);
+#endif
+    }
+
+    if ( (counters[subsys] + reqnum - 1) > cursize[subsys] ) {
       /* resize NDF and all data arrays */
 
       /* Unmap the data array */
@@ -598,13 +613,26 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
 	       status);
       }
 
+      /* work out how much to grow:
+	 - use requested size if given and more than 1
+	 - else use NGROW
+	 - make sure we grow by at least counters[subsys]-cursize[subsys]
+      */
+
+      if (reqnum > 1) {
+	ngrow = reqnum + counters[subsys] - cursize[subsys] - 1;
+      } else {
+	ngrow = NGROW;
+      }
+
       /* increment */
-      ubnd[TDIM] += NGROW;
+      ubnd[TDIM] += ngrow;
       newt = ubnd[TDIM] - lbnd[TDIM] + 1;
 
       /* set new bounds */
 #if SPW_DEBUG
-      printf("Setting new bounds. Grow to %lld sequence steps\n", (unsigned long long)ubnd[TDIM]);
+      printf("Setting new bounds. Grow to %lld sequence steps (from %lld)\n", (unsigned long long)newt,
+	     (unsigned long long)(newt-ngrow));
 #endif
       ndfSbnd( NDIMS, lbnd, ubnd, indf[subsys], status );
 
@@ -738,7 +766,12 @@ acsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
 
       /* Shrink file to actual size */
       ndfBound(indf[i], NDIMS, lbnd, ubnd, &itemp, status );
-      ubnd[TDIM] = counters[i];
+      if (counters[i] > 0) {
+	ubnd[TDIM] = lbnd[TDIM] + counters[i] - 1;
+      } else {
+	ubnd[TDIM] = lbnd[TDIM];
+      }
+
 #if SPW_DEBUG
       printf("Setting final bounds. Resize to %lld spectra\n", (unsigned long long)ubnd[TDIM]);
 #endif
@@ -782,6 +815,9 @@ acsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
     nchans_per_subsys[i] = 0;
   }
 
+  if (*status != SAI__OK) {
+    emsRep( " ", "Error closing Spectrum file", status );
+  }
 
 }
 
@@ -1018,7 +1054,9 @@ static void closeExtensions( unsigned int subsys, int * status ) {
 
   if ( *status != SAI__OK ) return;
 
-  resizeExtensions( subsys, counters[subsys], 0, status );
+  if (counters[subsys] > 0) {
+    resizeExtensions( subsys, counters[subsys], 0, status );
+  }
 
   /* Free locators */
   for (j=0; j < NEXTENSIONS; j++) {
@@ -1030,6 +1068,11 @@ static void closeExtensions( unsigned int subsys, int * status ) {
 
   /* indicate that we are closed down */
   extmapped[subsys] = 0;
+
+  /* delete the extension if we never wrote to it */
+  if (counters[subsys] == 0) {
+    ndfXdel(indf[subsys], extname,status);
+  }
 
   if (*status != SAI__OK)
     emsRep(" ", "Error closing JCMT state extension", status );
@@ -1237,10 +1280,17 @@ static void closeACSISExtensions( unsigned int subsys, int * status ) {
 
   if ( *status != SAI__OK ) return;
 
-  resizeACSISExtensions( subsys, counters[subsys], 0, status );
+  if (counters[subsys] > 0) {
+    resizeACSISExtensions( subsys, counters[subsys], 0, status );
+  }
 
   /* Free locators */
   datAnnul( &(receppos_loc[subsys]), status );
+
+  /* delete the receptor positions if never written */
+  if (counters[subsys] == 0) {
+    datErase(acsisloc[subsys], "RECEPPOS", status );
+  }
 
   /* Close extension */
   datAnnul( &(acsisloc[subsys]), status );
