@@ -74,8 +74,9 @@
 #define OBSLENGTH 1 /* Duration of the observation (seconds) */
 
 /* Number of sequence steps in observation and the total number
-   of spectra to write */
+   of spectra to write. SEQLEN is the length of a sequence in steps */
 #define NSEQ  ( OBSLENGTH * DUMPRATE )
+#define SEQLEN 10
 #define NSPEC ( NSEQ * NRECEP * NSUBSYS )
 
 /* data rate in MBps */
@@ -161,10 +162,12 @@ main ( void ) {
 
   acsSpecOpenTS( ".", 20060607, 53, NRECEP, nsubsys, nchans, (NSEQ/10), recepnames, &status);
   c = 0;
+  record.rts_endnum = 0;
   for (seq = 0; seq < NSEQ; seq++) {
     /* Increment sequence number in record */
     record.rts_num ++;
-    record.rts_endnum = 0;
+    /* assume new sequence every 10th step */
+    if ( seq % SEQLEN == 0) record.rts_endnum += SEQLEN;
     record.rts_end += step_time_in_days;
     for (i = 1; i <= NRECEP; i++) {
       record.acs_feed = i;
@@ -183,7 +186,7 @@ main ( void ) {
 	gettimeofday(&tp2, NULL);
 	diff = duration( &tp1, &tp2, &status);
 	if ( diff > 0.5 ) {
-	  printf("Scan %d was written in %.3f seconds\n", c, diff);
+	  printf("Scan %d  in feed %d of seq %u was written in %.3f seconds\n", c, i, seq, diff);
 	}
 
       }
