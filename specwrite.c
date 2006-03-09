@@ -447,7 +447,7 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 
 *  Invocation:
 *     acsSpecWriteTS( unsigned int subsys, const float spectrum[], 
-*                     const ACSISRtsState * record, const ACSISFreqInfo * freq,
+*                     const ACSISRtsState * record, const AstFitsChan * freq,
 *                     int *status);
 
 *  Language:
@@ -465,9 +465,13 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 *        Spectrum itself.
 *     record = const ACSISRtsState * (Given)
 *        Header information associated with this spectrum.
-*     freq = const ACSISFreqInfo * (Given)
-*        Frequency information associated with this spectrum.
-*        Only required for the first spectrum in any subsystem.
+*     freq = const AstFitsChan * (Given)
+*        Spectral coordinate information for this subsystem.
+*        If non-NULL, the spectral information is extracted
+*        and stored internally for this subsystem. Should be
+*        supplied with the first spectrum from each subsystem.
+*        Subsequent calls can pass in NULL and the cached
+*        world coordinates will be used.
 *     status = int * (Given & Returned)
 *        Inherited status.
 
@@ -507,7 +511,7 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 void
 acsSpecWriteTS( unsigned int subsys, const float spectrum[], 
 		const ACSISRtsState* record,
-		const ACSISFreqInfo * freq, int * status ) {
+		const AstFitsChan * freq, int * status ) {
 
   float * data; /* local copy of mapped pointer to spectrum */
   void *datapntrs[] = { NULL };/* Array of mapped pointers for ndfMap */

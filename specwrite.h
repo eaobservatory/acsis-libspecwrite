@@ -96,8 +96,6 @@ typedef struct ACSISRtsState {
   double tcs_tr_dc2;
   double tcs_tr_bc1;
   double tcs_tr_bc2;
-  float acs_tsys;
-  float acs_trx;
   float wvm_th;
   float wvm_t12;
   float wvm_t42;
@@ -106,6 +104,8 @@ typedef struct ACSISRtsState {
   int wvm_qual;
   float wvm_time;
   unsigned int acs_feed;  /* Feed number */
+  float acs_tsys;
+  float acs_trx;
   char  acs_source_ro[SIZEOF_ACS_SOURCE_RO+1];
   int   acs_source_rp;
   int   acs_spec_window_id;
@@ -114,13 +114,6 @@ typedef struct ACSISRtsState {
   double acs_feedy;  /* Y coordinate of feed "acs_feed" */
 } ACSISRtsState;
 
-/* Spectral scale */
-typedef struct ACSISFreqInfo {
-  double iffreq;
-  double finc;
-  double fcen;
-  double refchan;
-} ACSISFreqInfo;
 
 /* NDF versions of the Spectrum writing */
 
@@ -139,7 +132,7 @@ void acsSpecOpenTS( const char * dir,
 void acsSpecWriteTS( unsigned int subsys,
 		     const float spectrum[],
 		     const ACSISRtsState * state,
-		     const ACSISFreqInfo * freq,
+		     const AstFitsChan * freq,
 		     int * status );
 
 /* Close the file */
