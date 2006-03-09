@@ -86,6 +86,10 @@ static void writeRecord( unsigned int subsys, const ACSISRtsState * record,
 			 int * status );
 static void writeRecepPos( unsigned int subsys, const ACSISRtsState * record, int * status );
 
+#if SPW_DEBUG
+static double duration ( struct timeval * tp1, struct timeval * tp2 );
+#endif
+
 /* Largest file name allowed (including path) */
 #define MAXFILE 1024
 
@@ -94,6 +98,22 @@ static void writeRecepPos( unsigned int subsys, const ACSISRtsState * record, in
 #define myxstr(s) mystr(s)
 #define mystr(s) #s
 #define CHARTYP(s) "_CHAR*" myxstr(s)
+
+/* Threshold for reporting timing anomalise */
+#define LONGTIME 2.0
+
+/* Macro to time an event */
+#if SPW_DEBUG
+#define TIMEME(label,func) { struct timeval tp1; struct timeval tp2; double tpdiff; \
+    gettimeofday( &tp1, NULL ); \
+    func;			\
+    gettimeofday( &tp2, NULL ); \
+    tpdiff = duration( &tp1, &tp2 ); \
+    if (tpdiff > LONGTIME) printf( ">>>>>>>>>>>>>>>>>" label " took %.3f seconds <<<<<<<<<<<<<<<\n", tpdiff); \
+  }
+#else
+#define TIMEME(func)  func
+#endif
 
 /* Define the number of extensions we support */
 #define NEXTENSIONS 43
@@ -525,6 +545,9 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
   unsigned int nreceps;        /* number of receptors from bounds */
   unsigned int ngrow;          /* number of time slices to grow file */
   unsigned int reqnum;         /* number of time slices indicates by RTS sequence */
+  AstSpecFrame * template;     /* Template of a specFrame */
+  AstFrameSet  * foundframe;   /* Frameset from template to found frame */
+  int * astat;                 /* Current AST status pointer */
 
   if (*status != SAI__OK) return;
 
@@ -550,8 +573,9 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
 
 
 
-  /* write .WCS? */
-  if (counters[subsys] == 0) {
+  /* have we been given WCS? */
+  if ( freq ) {
+    /* Need to extract astrometry from the FitsChan */
   }
 
   /* if the sequence number has incremented we need to increase the t-axis counter */
@@ -574,19 +598,28 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
 
     if ( record->rts_endnum > record->rts_num ) {
       reqnum = record->rts_endnum - record->rts_num + 1;
-#if SPW_DEBUG
-      printf("Required number of sequence steps at sequence %u is %u counter=%u cursize=%u\n",record->rts_num, reqnum, counters[subsys], cursize[subsys]);
-#endif
     }
 
     if ( (counters[subsys] + reqnum - 1) > cursize[subsys] ) {
       /* resize NDF and all data arrays */
 
+      /* work out how much to grow:
+	 - use requested size if given and more than 1
+	 - else use NGROW
+	 - make sure we grow by at least counters[subsys]-cursize[subsys]
+      */
+
+      if (reqnum > 1) {
+	ngrow = reqnum + counters[subsys] - cursize[subsys] - 1;
+      } else {
+	ngrow = NGROW;
+      }
+
       /* Unmap the data array */
 #if SPW_DEBUG
       printf("Unmap data array in preparation for resize\n");
 #endif
-      ndfUnmap(indf[subsys], "DATA", status );
+      TIMEME( "ndfUnmap", ndfUnmap(indf[subsys], "DATA", status ););
 
       /* Get the existing bounds */
       ndfBound(indf[subsys], NDIMS, lbnd, ubnd, &itemp, status );
@@ -617,18 +650,6 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
 	       status);
       }
 
-      /* work out how much to grow:
-	 - use requested size if given and more than 1
-	 - else use NGROW
-	 - make sure we grow by at least counters[subsys]-cursize[subsys]
-      */
-
-      if (reqnum > 1) {
-	ngrow = reqnum + counters[subsys] - cursize[subsys] - 1;
-      } else {
-	ngrow = NGROW;
-      }
-
       /* increment */
       ubnd[TDIM] += ngrow;
       newt = ubnd[TDIM] - lbnd[TDIM] + 1;
@@ -638,18 +659,18 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
       printf("Setting new bounds. Grow to %lld sequence steps (from %lld)\n", (unsigned long long)newt,
 	     (unsigned long long)(newt-ngrow));
 #endif
-      ndfSbnd( NDIMS, lbnd, ubnd, indf[subsys], status );
+      TIMEME("Set NDF bounds", ndfSbnd( NDIMS, lbnd, ubnd, indf[subsys], status ););
 
       /* map data array again */
 #if SPW_DEBUG
       printf("Remap the data array\n");
 #endif
-      ndfMap( indf[subsys], "DATA", "_REAL", "WRITE", datapntrs, &itemp, status );
+      TIMEME("Remp NDF", ndfMap( indf[subsys], "DATA", "_REAL", "WRITE", datapntrs, &itemp, status ););
       spectra[subsys] = datapntrs[0];
 
       /* Resize the extensions */
-      resizeExtensions( subsys, newt, 1, status  );
-      resizeACSISExtensions( subsys, newt, 1, status  );
+      TIMEME("Resize extensions", resizeExtensions( subsys, newt, 1, status  ););
+      TIMEME("Resize coords", resizeACSISExtensions( subsys, newt, 1, status  ););
 
       /* Update cursize */
       cursize[subsys] = newt;
@@ -1327,3 +1348,15 @@ static void writeRecepPos( unsigned int subsys, const ACSISRtsState * record, in
   }
 
 }
+
+#if SPW_DEBUG
+/* simply subtract two timeval structs and return the answer */
+/* Does tp2 - tp1 */
+static double duration ( struct timeval * tp1, struct timeval * tp2 ) {
+  double diff = 0.0;
+  diff = (tp2->tv_sec - tp1->tv_sec) +
+    (tp2->tv_usec - tp1->tv_usec ) / 1E6;
+
+  return diff;
+}
+#endif
