@@ -58,6 +58,7 @@
 #define SIZEOF_TCS_TR_SYS 16
 #define SIZEOF_ACS_RECEPTOR   5
 #define SIZEOF_ACS_SOURCE_RO  32
+#define SIZEOF_ACS_SOURCE_RP  10
 
 /* Public data structures */
 
@@ -100,18 +101,14 @@ typedef struct ACSISRtsState {
   double tcs_tr_dc2;
   double tcs_tr_bc1;
   double tcs_tr_bc2;
-  float wvm_th;
-  float wvm_t12;
-  float wvm_t42;
-  float wvm_t78;
-  float wvm_tw;
-  int wvm_qual;
-  float wvm_time;
+  float enviro_rel_hum;
+  float enviro_pressure;
+  float enviro_air_temp;
   unsigned int acs_feed;  /* Feed number */
   float acs_tsys;
   float acs_trx;
   char  acs_source_ro[SIZEOF_ACS_SOURCE_RO+1];
-  int   acs_source_rp;
+  char  acs_source_rp[SIZEOF_ACS_SOURCE_RP+1];
   int   acs_spec_window_id;
   int   acs_drcontrol;
   double acs_feedx;  /* Y coordinate of feed "acs_feed" */

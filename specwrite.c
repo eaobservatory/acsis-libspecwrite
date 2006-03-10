@@ -116,7 +116,7 @@ static double duration ( struct timeval * tp1, struct timeval * tp2 );
 #endif
 
 /* Define the number of extensions we support */
-#define NEXTENSIONS 43
+#define NEXTENSIONS 39
 
 /* Number of dimensions in output NDF */
 #define NDIMS 3
@@ -163,13 +163,9 @@ static double duration ( struct timeval * tp1, struct timeval * tp2 );
 #define ACS_DRCONTROL    33
 #define ACS_TSYS         34
 #define ACS_TRX          35
-#define WVM_TH       36
-#define WVM_T12      37
-#define WVM_T42      38
-#define WVM_T78      39
-#define WVM_TW       40
-#define WVM_QUAL     41
-#define WVM_TIME     42  
+#define ENVIRO_REL_HUM   36
+#define ENVIRO_PRESSURE  37
+#define ENVIRO_AIR_TEMP  38
 
 /* Definitions of HDS types associated with ACSISRtsStates struct. All these
    will be created in the file. */
@@ -207,17 +203,13 @@ static const char * hdsRecordNames[NEXTENSIONS][2] =
    { "_DOUBLE", "TCS_TR_BC1" },
    { "_DOUBLE", "TCS_TR_BC2" },
    { CHARTYP(SIZEOF_ACS_SOURCE_RO), "ACS_SOURCE_RO" },
-   { "_INTEGER", "ACS_SOURCE_RP" },
+   { CHARTYP(SIZEOF_ACS_SOURCE_RP), "ACS_SOURCE_RP" },
    { "_INTEGER", "ACS_DRCONTROL" },
    { "_REAL",    "ACS_TSYS" },
    { "_REAL",     "ACS_TRX" },
-   { "_REAL", "WVM_TH" },
-   { "_REAL", "WVM_T12" },
-   { "_REAL", "WVM_T42" },
-   { "_REAL", "WVM_T78" },
-   { "_REAL", "WVM_TW" },
-   { "_INTEGER", "WVM_QUAL" },
-   { "_REAL", "WVM_TIME" }
+   { "_REAL", "ENVIRO_REL_HUM" },
+   { "_REAL", "ENVIRO_PRESSURE" },
+   { "_REAL", "ENVIRO_AIR_TEMP" },
   };
 
 /* Extension support */
@@ -1167,19 +1159,17 @@ static void writeRecord( unsigned int subsys, const ACSISRtsState * record,
   cnfExprt( record->acs_source_ro,
 	    (char*)extdata[subsys][ACS_SOURCE_RO]+ SIZEOF_ACS_SOURCE_RO*frame,
 	    SIZEOF_ACS_SOURCE_RO );
+  cnfExprt( record->acs_source_rp,
+	    (char*)extdata[subsys][ACS_SOURCE_RP]+ SIZEOF_ACS_SOURCE_RP*frame,
+	    SIZEOF_ACS_SOURCE_RP );
 
-  ((int *)extdata[subsys][ACS_SOURCE_RP])[frame] = record->acs_source_rp;
   ((int *)extdata[subsys][ACS_DRCONTROL])[frame] = record->acs_drcontrol;
   ((float *)extdata[subsys][ACS_TSYS])[frame] = record->acs_tsys;
   ((float *)extdata[subsys][ACS_TRX])[frame] = record->acs_trx;
 
-  ((float *)extdata[subsys][WVM_TH])[frame] = record->wvm_th;
-  ((float *)extdata[subsys][WVM_T12])[frame] = record->wvm_t12;
-  ((float *)extdata[subsys][WVM_T42])[frame] = record->wvm_t42;
-  ((float *)extdata[subsys][WVM_T78])[frame] = record->wvm_t78;
-  ((float *)extdata[subsys][WVM_TW])[frame] = record->wvm_tw;
-  ((int *)extdata[subsys][WVM_QUAL])[frame] = record->wvm_qual;
-  ((float *)extdata[subsys][WVM_TIME])[frame] = record->wvm_time;
+  ((float *)extdata[subsys][ENVIRO_AIR_TEMP])[frame] = record->enviro_air_temp;
+  ((float *)extdata[subsys][ENVIRO_PRESSURE])[frame] = record->enviro_pressure;
+  ((float *)extdata[subsys][ENVIRO_REL_HUM])[frame] = record->enviro_rel_hum;
 
 }
 
