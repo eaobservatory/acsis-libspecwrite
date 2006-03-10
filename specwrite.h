@@ -70,13 +70,17 @@ typedef struct ACSISRtsState {
   double rts_end;    /* MJD TAI of end of sequence step */
   char   rts_tasks[SIZEOF_RTS_TASKS + 1];
   char   rts_errs[SIZEOF_RTS_ERRS + 1];
-  double smu_az_off_x;
-  double smu_az_off_y;
+  double smu_az_jig_x;
+  double smu_az_jig_y;
+  double smu_az_chop_x;
+  double smu_az_chop_y;
   double smu_x;
   double smu_y;
   double smu_z;
-  double smu_tr_off_x;
-  double smu_tr_off_y;
+  double smu_tr_jig_x;
+  double smu_tr_jig_y;
+  double smu_tr_chop_x;
+  double smu_tr_chop_y;
   double tcs_airmass;
   char   tcs_az_sys[SIZEOF_TCS_AZ_SYS+1];
   double tcs_az_ang;

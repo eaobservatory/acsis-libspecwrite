@@ -132,13 +132,13 @@ static double duration ( struct timeval * tp1, struct timeval * tp2 );
 #define RTS_STEP     2
 #define RTS_END      3
 #define RTS_TASKS    4
-#define SMU_AZ_OFF_X 5
-#define SMU_AZ_OFF_Y 6
+#define SMU_AZ_JIG_X 5
+#define SMU_AZ_JIG_Y 6
 #define SMU_X        7
 #define SMU_Y        8
 #define SMU_Z        9 
-#define SMU_TR_OFF_X 10
-#define SMU_TR_OFF_Y 11
+#define SMU_TR_JIG_X 10
+#define SMU_TR_JIG_Y 11
 #define TCS_AIRMASS  12
 #define TCS_AZ_SYS   13
 #define TCS_AZ_ANG   14
@@ -180,13 +180,13 @@ static const char * hdsRecordNames[NEXTENSIONS][2] =
    { "_DOUBLE", "RTS_STEP" },
    { "_DOUBLE", "RTS_END" },
    { CHARTYP(SIZEOF_RTS_TASKS), "RTS_TASKS" },
-   { "_DOUBLE", "SMU_AZ_OFF_X" },
-   { "_DOUBLE", "SMU_AZ_OFF_Y" },
+   { "_DOUBLE", "SMU_AZ_JIG_X" },
+   { "_DOUBLE", "SMU_AZ_JIG_Y" },
    { "_DOUBLE", "SMU_X" },
    { "_DOUBLE", "SMU_Y" },
    { "_DOUBLE", "SMU_Z" },
-   { "_DOUBLE", "SMU_TR_OFF_X" },
-   { "_DOUBLE", "SMU_TR_OFF_Y" },
+   { "_DOUBLE", "SMU_TR_JIG_X" },
+   { "_DOUBLE", "SMU_TR_JIG_Y" },
    { "_DOUBLE", "TCS_AIRMASS" },
    { CHARTYP(SIZEOF_TCS_AZ_SYS), "TCS_AZ_SYS" },
    { "_DOUBLE", "TCS_AZ_ANG" },
@@ -1127,13 +1127,13 @@ static void writeRecord( unsigned int subsys, const ACSISRtsState * record,
 	    SIZEOF_RTS_TASKS*frame,
 	    SIZEOF_RTS_TASKS );
 
-  ((double *)extdata[subsys][SMU_AZ_OFF_X])[frame] = record->smu_az_off_x;
-  ((double *)extdata[subsys][SMU_AZ_OFF_Y])[frame] = record->smu_az_off_y;
+  ((double *)extdata[subsys][SMU_AZ_JIG_X])[frame] = record->smu_az_jig_x;
+  ((double *)extdata[subsys][SMU_AZ_JIG_Y])[frame] = record->smu_az_jig_y;
   ((double *)extdata[subsys][SMU_X])[frame] = record->smu_x;
   ((double *)extdata[subsys][SMU_Y])[frame] = record->smu_y;
   ((double *)extdata[subsys][SMU_Z])[frame] = record->smu_z;
-  ((double *)extdata[subsys][SMU_TR_OFF_X])[frame] = record->smu_tr_off_x;
-  ((double *)extdata[subsys][SMU_TR_OFF_Y])[frame] = record->smu_tr_off_y;
+  ((double *)extdata[subsys][SMU_TR_JIG_X])[frame] = record->smu_tr_jig_x;
+  ((double *)extdata[subsys][SMU_TR_JIG_Y])[frame] = record->smu_tr_jig_y;
   ((double *)extdata[subsys][TCS_AIRMASS])[frame] = record->tcs_airmass;
 
   cnfExprt(record->tcs_az_sys,
