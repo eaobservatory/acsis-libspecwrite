@@ -169,7 +169,7 @@ main ( void ) {
     /* assume new sequence every 10th step */
     if ( seq % SEQLEN == 0) record.rts_endnum += SEQLEN;
     record.rts_end += step_time_in_days;
-    for (i = 1; i <= NRECEP; i++) {
+    for (i = 0; i < NRECEP; i++) {
       record.acs_feed = i;
       record.acs_feedx = 1.0;
       record.acs_feedy = VAL__BADD;

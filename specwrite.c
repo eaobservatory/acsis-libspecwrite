@@ -600,7 +600,7 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
     /* Calculate offset into array - number of spectra into the array times number of
        channels per spectrum. */
     offset = nchans_per_subsys[subsys] *
-      (nreceps_per_obs * (counters[subsys] - 1) + (record->acs_feed - 1));
+      (nreceps_per_obs * (counters[subsys] - 1) + record->acs_feed );
 
     data = spectra[subsys];
     memcpy( &(data[offset]), spectrum, nchans_per_subsys[subsys]*sizeof(float) );
@@ -1345,7 +1345,7 @@ static void writeRecepPos( unsigned int subsys, const ACSISRtsState * record, in
   if (*status != SAI__OK) return;
 
   /* Calculate offset into data array */
-  offset = 2 * ( (nreceps_per_obs * (counters[subsys]-1) ) + record->acs_feed - 1);
+  offset = 2 * ( (nreceps_per_obs * (counters[subsys]-1) ) + record->acs_feed );
 
   posdata = receppos_data[subsys];
   if (posdata != NULL) {
