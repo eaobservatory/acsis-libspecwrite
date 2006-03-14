@@ -30,16 +30,15 @@
 
 /* Global state variables */
 
-/* Locator of the root HDS container file */
-
-static HDSLoc * locator = NULL;
-
 /* Maximum number of subsystems we can handle 
    We know that ACSIS can have at most 4 spectral subsystems
    and they will not change during a single observation. */
 
 #define MAXSUBSYS 4
 const unsigned int maxsubsys = MAXSUBSYS;
+
+/* Lookup table to enable us to name the files for each subsystem */
+const char subsysprefix[MAXSUBSYS] = { 'a', 'b', 'c', 'd' };
 
 /* Current sequence number (so that we know when we need to increment the time axis "counters")
    Note that the sequence number will not be sequential and will not start at zero. It will
@@ -78,19 +77,17 @@ static unsigned int this_subscan = 0;
 
 /* internal prototypes */
 static void writeFitsChan( int indf, const AstFitsChan * fitschan, int * status );
-static char * getFileName( const char * dir, unsigned int yyyymmdd, 
+static char * getFileName( const char * dir, unsigned int yyyymmdd, unsigned int subsys,
 			   unsigned int obsnum, unsigned int subscan, int * status );
 static char * getDirName( const char * dir, unsigned int yyyymmdd, 
 			   unsigned int obsnum, int * status );
-static char * getFileRoot( unsigned int yyyymmdd, 
+static char * getFileRoot( unsigned int yyyymmdd, unsigned int subsys,
 			   unsigned int obsnum, unsigned int subscan, int * status );
 
 static char * createSubScanDir( const char * dir, unsigned int yyyymmdd, 
 				unsigned int obsnum,
 				int * status );
 
-static char * openHDSContainer( const char * dir, unsigned int yyyymmdd,
-			      unsigned int obsnum, unsigned int subscan, int * status );
 static void
 openNDF( unsigned int subsys, unsigned int nrecep, unsigned int nchans,
 	 unsigned int nseq, const char * recepnames[], int * status );
@@ -145,6 +142,13 @@ static double duration ( struct timeval * tp1, struct timeval * tp2 );
 #else
 #define TIMEME(func)  func
 #endif
+
+/* Macro to check subsys range */
+#define CHECKSUBSYS( sub, st ) if ( st == SAI__OK && sub > (MAXSUBSYS -1 )) { \
+				      *st = SAI__ERROR; \
+				      emsSetu( "SB", sub ); \
+				      emsSetu( "MX", (MAXSUBSYS-1) ); \
+				      emsRep( " ", "Subsystem out of range. ^SB > ^MX", st ); }
 
 /* Define the number of extensions we support */
 #define NEXTENSIONS 39
@@ -419,8 +423,8 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
   /* Reset subscan number */
   this_subscan = 1;
 
-  /* Open the container file */
-  openHDSContainer( datadir, yyyymmdd, obsnum, this_subscan, status );
+  /* we need to store the receptor names somewhere locally */
+
 
   /* Need an NDF per subsystem */
   for (i = 0; i < nsubsys; i++) {
@@ -679,14 +683,6 @@ acsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
   /* Always check status on entry */
   if (*status != SAI__OK) return;
 
-  /* Is the file opened? */
-  if (locator == NULL) {
-    *status = SAI__ERROR;
-    emsRep( " ",
-	    "acsSpecCloseTS: No file is open. Has acsSpecOpen been called?", status );
-    return;
-  }
-
   /* Loop over each NDF to write fits header and to close it */
   found = 0;
   for (i = 0; i < maxsubsys; i++) {
@@ -701,9 +697,6 @@ acsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
     *status = SAI__ERROR;
     emsRep(" ", "acsSpecCloseTS: Failed to find open NDF components", status );
   }
-
-  /* Close the file */
-  hdsClose( &locator, status);
 
   /* Now need to open all the files that we have opened previously and adjust
      all the FITS headers. This is going to be problematic for the ones that
@@ -789,7 +782,7 @@ static void writeFitsChan( int indf, const AstFitsChan * fits, int * status ) {
    - returns a pointer to static memory.
  */
 
-static char * getFileName( const char * dir, unsigned int yyyymmdd,
+static char * getFileName( const char * dir, unsigned int yyyymmdd, unsigned int subsys,
 			   unsigned int obsnum, unsigned int subscan, int * status ) {
 
   static char filename[MAXFILE]; /* buffer for filename - will be returned */
@@ -797,7 +790,7 @@ static char * getFileName( const char * dir, unsigned int yyyymmdd,
   char * root;                   /* Root filename */
 
   if (*status != SAI__OK) return NULL;
-  root = getFileRoot( yyyymmdd, obsnum, subscan, status );
+  root = getFileRoot( yyyymmdd, subsys, obsnum, subscan, status );
   if (*status != SAI__OK) return NULL;
 
   /* Form the file name - assume posix filesystem */
@@ -822,20 +815,27 @@ static char * getFileName( const char * dir, unsigned int yyyymmdd,
    Returns static memory.
  */
 
-static char * getFileRoot( unsigned int yyyymmdd,
+static char * getFileRoot( unsigned int yyyymmdd, unsigned int subsys,
 			   unsigned int obsnum, unsigned int subscan, int * status ) {
 
   static char rootname[MAXFILE]; /* buffer for filename - will be returned */
-  int flen;                        /* Length of string */
+  int flen = 0;                  /* Length of string from snprintf */
+
+  if (*status != SAI__OK) return NULL;
+
+  /* Check subsys */
+  CHECKSUBSYS(subsys, status );
 
   /* Form the file name - assume posix filesystem */
-  if (subscan > 0) {
-    flen = snprintf(rootname, MAXFILE, "a%d_%05d_%04d", yyyymmdd, obsnum, subscan );
-  } else {
-    flen = snprintf(rootname, MAXFILE, "a%d_%05d", yyyymmdd, obsnum );
+  if (*status == SAI__OK) {
+    if (subscan > 0) {
+      flen = snprintf(rootname, MAXFILE, "a%c%d_%05d_%04d", subsysprefix[subsys], yyyymmdd, obsnum, subscan );
+    } else {
+      flen = snprintf(rootname, MAXFILE, "a%d_%05d", yyyymmdd, obsnum );
+    }
   }
 
-  if (flen >= MAXFILE) {
+  if (flen >= MAXFILE && *status == SAI__OK) {
     *status = SAI__ERROR;
     emsSeti("SZ", MAXFILE );
     emsSetu("N", obsnum );
@@ -860,7 +860,7 @@ static char * getDirName( const char * dir, unsigned int yyyymmdd,
   char * root;                   /* Root filename */
 
   if (*status != SAI__OK) return NULL;
-  root = getFileRoot( yyyymmdd, obsnum, 0, status );
+  root = getFileRoot( yyyymmdd, 0, obsnum, 0, status );
   if (*status != SAI__OK) return NULL;
 
   /* Form the file name - assume posix filesystem */
@@ -920,45 +920,7 @@ createSubScanDir( const char * rootdir, unsigned int yyyymmdd, unsigned int obsn
 
 }
 
-/* Open a root HDS container file of the correct name.
-   Can create a directory for the files.
-   The locator itself is stored in the global "locator" variable.
-   The name of the file is returned.
-*/
-
-static char *
-openHDSContainer( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
-		  unsigned int subscan, int * status ) {
-
-  const hdsdim dims[] = { 1 }; /* HDS dimensions (always ignored) */ 
-  char *filename;              /* HDS root filename */
-
-  /* Return immediately if status is bad */
-  if (*status != SAI__OK) return NULL;
-
-  /* Check to see if we've already been called */
-  if (locator != NULL) {
-    *status = SAI__ERROR;
-    emsRep("HDS_SPEC_OPEN_ERR0",
-	   "acsSpecOpen called, yet an HDS file is already open", status);
-    return NULL;
-  }
-
-  /* Form the file name - assume posix filesystem */
-  filename = getFileName( dir, yyyymmdd, obsnum, subscan, status );
-
-  /* Try to open the file */
-  hdsNew( filename, "ACSIS_SPEC", "CONTAINER", 0, dims, &locator, status );
-
-  if (*status != SAI__OK) {
-    locator = NULL;
-    emsRep(" ", "Error opening HDS container file", status );
-  }
-
-  /* Complete */
-  return filename;
-
-}
+/* Open an NDF file for that subsystem */
 
 static void
 openNDF( unsigned int subsys, unsigned int nrecep, unsigned int nchans,
@@ -967,9 +929,8 @@ openNDF( unsigned int subsys, unsigned int nrecep, unsigned int nchans,
   void *datapntrs[] = { NULL };/* Array of mapped pointers for ndfMap */
   int itemp;                   /* Temp integer */
   int lbnd[NDIMS];             /* Lower pixel bounds */
-  char ndfname[DAT__SZNAM+1];  /* NDF filename */
+  char *ndfname;               /* NDF filename */
   unsigned int ngrow;   /* Initial size to grow array */
-  int nlen;                    /* Number of characters in NDF component name */
   int place;                   /* NDF placeholder */
   int ubnd[NDIMS];             /* upper pixel bounds */
   char * history[1] = { "ACSIS Data Acquistion" };
@@ -979,14 +940,7 @@ openNDF( unsigned int subsys, unsigned int nrecep, unsigned int nchans,
   printf("Opening subsystem %d\n",subsys);
 #endif
   /* Name the NDF component */
-  nlen = snprintf(ndfname, DAT__SZNAM+1, "SUBSYS%u", subsys );
-
-  if (nlen > DAT__SZNAM) {
-    *status = SAI__ERROR;
-    emsRep("HDS_SPEC_OPENTS_ERR2",
-	   "Buffer overflow when forming NDF component name", status);
-    return;
-  }
+  ndfname = getFileName(datadir, this_ut, subsys, this_obs_num, this_subscan, status );
 
   /* Calculate bounds */
   ngrow = (nseq > 0 ? nseq : NGROW );
@@ -998,11 +952,11 @@ openNDF( unsigned int subsys, unsigned int nrecep, unsigned int nchans,
   ubnd[TDIM] = ngrow;
 
 #if SPW_DEBUG
-  printf("Opening NDF component '%s' (length=%d) to default size of %u sequence steps\n", ndfname, nlen, ngrow);
+  printf("Opening NDF file '%s' to default size of %u sequence steps\n", ndfname, ngrow);
 #endif
 
   /* create the NDF */
-  ndfPlace( locator, ndfname, &place, status );
+  ndfPlace( NULL, ndfname, &place, status );
   ndfNew( "_REAL", NDIMS, lbnd, ubnd, &place, &(indf[subsys]), status );
 
   /* Update the cursize[] array and the nchans array */
