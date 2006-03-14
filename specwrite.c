@@ -249,9 +249,9 @@ static const char * hdsRecordNames[NEXTENSIONS][2] =
 
 /* Extension support */
 
-/* Name of STATE extension - could almost be shared with SCUBA2... */
-static char extname[] = "JCMTSTATE";
-static char exttype[] = "RTS_ARR";
+/* Name of STATE and ACSIS extensions - some could almost be shared with SCUBA2... */
+#define STATEEXT   "JCMTSTATE"
+#define STATEEXTTYPE "RTS_ARR"
 
 #define ACSISEXT   "ACSIS"
 #define ACSISEXTTYP "ACSIS_COMP"
@@ -1011,7 +1011,7 @@ createExtensions( unsigned int subsys, unsigned int size, int * status ) {
   dim[0] = size;
 
   /* Create the extension */
-  ndfXnew( indf[subsys], extname, exttype, 0, NULL, &(extloc[subsys]), status ); 
+  ndfXnew( indf[subsys], STATEEXT, STATEEXTTYPE, 0, NULL, &(extloc[subsys]), status ); 
 
   /* Loop and create. Can initialise HDS locator array safely */
   for (j=0; j < NEXTENSIONS; j++ ) {
@@ -1108,7 +1108,7 @@ static void closeExtensions( unsigned int subsys, int * status ) {
 
   /* delete the extension if we never wrote to it */
   if (counters[subsys] == 0) {
-    ndfXdel(indf[subsys], extname,status);
+    ndfXdel(indf[subsys], STATEEXT,status);
   }
 
   if (*status != SAI__OK)
