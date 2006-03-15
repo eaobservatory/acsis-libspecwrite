@@ -124,6 +124,7 @@ main ( void ) {
   unsigned int c;
   unsigned int seq;
   int exstat;
+  unsigned int lseq;
 
   emsBegin( &status );
 
@@ -164,10 +165,14 @@ main ( void ) {
   c = 0;
   record.rts_endnum = 0;
   for (seq = 0; seq < NSEQ; seq++) {
+    lseq = seq;
+
     /* Increment sequence number in record */
-    record.rts_num ++;
+    record.rts_num = lseq + 1;
+
     /* assume new sequence every 10th step */
-    if ( seq % SEQLEN == 0) record.rts_endnum += SEQLEN;
+    if ( lseq % SEQLEN == 0) record.rts_endnum += SEQLEN;
+
     record.rts_end += step_time_in_days;
     for (i = 0; i < NRECEP; i++) {
       record.acs_feed = i;
@@ -186,7 +191,7 @@ main ( void ) {
 	gettimeofday(&tp2, NULL);
 	diff = duration( &tp1, &tp2, &status);
 	if ( diff > 0.5 ) {
-	  printf("Scan %d  in feed %d of seq %u was written in %.3f seconds\n", c, i, seq, diff);
+	  printf("Scan %d  in feed %d of seq %u was written in %.3f seconds\n", c, i, lseq, diff);
 	}
 
       }
