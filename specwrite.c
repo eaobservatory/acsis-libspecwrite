@@ -61,6 +61,10 @@ static unsigned int nchans_per_subsys[MAXSUBSYS] = { 0, 0, 0, 0 };
 /* Number of receptors in this particular observation */
 static unsigned int nreceps_per_obs = 0;
 
+/* Maximum number of sequence steps allowed per subsys before
+   a new file is required */
+static unsigned int max_seq[MAXSUBSYS] = { 0, 0, 0, 0 };
+
 /* Pointer into mapped data array for each subsystem */
 static float * spectra[MAXSUBSYS] = { NULL, NULL, NULL, NULL };
 
@@ -433,11 +437,14 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
   /* Reset subscan number */
   this_subscan = 1;
 
-  /* we need to store the receptor names somewhere locally */
-
+  /* Calculate the number of sequence steps that we are allowed to grow
+     before opening new file. */
 
   /* Need an NDF per subsystem */
   for (i = 0; i < nsubsys; i++) {
+
+    /* we need to store the receptor names somewhere locally */
+    max_seq[i] = MAXBYTES / ( nrecep * nchans[i] * sizeof(float) );
 
     openNDF( i, nrecep, nchans[i], nseq, recepnames, status );
 
@@ -658,8 +665,19 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
 	ngrow = NGROW;
       }
 
-      /* Resize the NDF */
-      resizeNDF( subsys, ngrow, status );
+      /* if this will put us over the limit, close the NDF and reopen a new
+	 one */
+      if ( (cursize[subsys] + ngrow ) > max_seq[subsys] ) {
+	closeNDF( subsys, status);
+	this_subscan++;
+	tindex = 0;
+	openNDF( subsys, nreceps_per_obs, nchans_per_subsys[subsys], ngrow, 
+		 NULL, status );
+      } else {
+
+	/* Resize the NDF */
+	resizeNDF( subsys, ngrow, status );
+      }
     }
   }
 
@@ -1003,6 +1021,17 @@ openNDF( unsigned int subsys, unsigned int nrecep, unsigned int nchans,
   int ubnd[NDIMS];             /* upper pixel bounds */
   char * history[1] = { "ACSIS Data Acquistion" };
 
+
+  if (*status != SAI__OK) return;
+
+  if (nseq > max_seq[subsys]) {
+    *status = SAI__ERROR;
+    emsSetu( "NS", nseq);
+    emsSetu( "MAX", max_seq[subsys]);
+    emsSetu( "MB", MAXBYTES / (1024*1024));
+    emsRep(" ", "openNDF: Unable to open NDF since the number of sequences to be stored (^NS) already exceeds the maximum allowed (^MAX seq or ^MB megabytes)", status);
+    return;
+  }
 
 #if SPW_DEBUG
   printf("Opening subsystem %d\n",subsys);
@@ -1387,6 +1416,7 @@ static void closeACSISExtensions( unsigned int subsys, int * status ) {
 
   /* Free locators */
   datAnnul( &(receppos_loc[subsys]), status );
+  receppos_data[subsys] = NULL;
 
   /* delete the receptor positions if never written */
   if (curpos[subsys] == 0) {
