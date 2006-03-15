@@ -35,19 +35,22 @@
    and they will not change during a single observation. */
 
 #define MAXSUBSYS 4
-const unsigned int maxsubsys = MAXSUBSYS;
+static const unsigned int maxsubsys = MAXSUBSYS;
 
 /* Lookup table to enable us to name the files for each subsystem */
-const char subsysprefix[MAXSUBSYS] = { 'a', 'b', 'c', 'd' };
+static const char subsysprefix[MAXSUBSYS] = { 'a', 'b', 'c', 'd' };
 
-/* Current sequence number (so that we know when we need to increment the time axis "counters")
-   Note that the sequence number will not be sequential and will not start at zero. It will
-   just guarantee to be at least the same as the previous value (for multi-receptor observations).
+/* Current sequence number (so that we know when we need to increment
+   the time axis "counters") Note that the sequence number will not be
+   sequential and will not start at zero. It will just guarantee to be
+   at least the same as the previous value (for multi-receptor
+   observations).
 */
 static unsigned int curseq[MAXSUBSYS] = { 0,0,0,0 };
 
-/* t- Position to write next spectrum - Fortran indexing */
-static unsigned int counters[MAXSUBSYS] = { 0, 0, 0, 0 };
+/* t- Position to write next sequence - Fortran indexing */
+/* This is where new sequences will end up */
+static unsigned int curpos[MAXSUBSYS] = { 0, 0, 0, 0 };
 
 /* Current size of NDF for each subsystem */
 static unsigned int cursize[MAXSUBSYS] = { 0, 0, 0, 0 };
@@ -70,8 +73,8 @@ static int indf[MAXSUBSYS] = { NDF__NOID, NDF__NOID, NDF__NOID, NDF__NOID };
 
 /* Information required to construct a filename */
 static char datadir[MAXFILE+1];
-unsigned int this_obs_num = 0;
-unsigned int this_ut = 0; 
+static unsigned int this_obs_num = 0;
+static unsigned int this_ut = 0; 
 static unsigned int this_subscan = 0;
 
 
@@ -112,9 +115,13 @@ static void resizeACSISExtensions( unsigned int subsys, unsigned int newsize, in
 static void closeExtensions( unsigned int subsys, int * status );
 static void closeACSISExtensions( unsigned int subsys, int * status );
 
-static void writeRecord( unsigned int subsys, const ACSISRtsState * record, 
+static void writeRecord( unsigned int subsys, unsigned int tindex,
+			 const ACSISRtsState * record, 
 			 int * status );
-static void writeRecepPos( unsigned int subsys, const ACSISRtsState * record, int * status );
+static void writeRecepPos( unsigned int subsys, unsigned int tindex,
+			   const ACSISRtsState * record, int * status );
+static unsigned int calcOffset( unsigned int nchans, unsigned int maxreceps, unsigned int nrecep, 
+				unsigned int tindex, int *status );
 
 #if SPW_DEBUG
 static double duration ( struct timeval * tp1, struct timeval * tp2 );
@@ -291,6 +298,9 @@ static double * receppos_data[MAXSUBSYS] = { NULL, NULL, NULL, NULL };
 
 /* Number of bytes we should write before opening a new file */
 #define MAXBYTES ( 100 * 1024 * 1024 )
+
+/* maximum number of sequence steps we can get out of sequence */
+#define MAXSEQERR  5
 
 
 /*
@@ -521,7 +531,11 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
   unsigned int reqnum;         /* number of time slices indicates by RTS sequence */
   AstSpecFrame * template;     /* Template of a specFrame */
   AstFrameSet  * foundframe;   /* Frameset from template to found frame */
-
+  unsigned int tindex;         /* Position in sequence array for this sequence */
+  unsigned int *rtsseqs;       /* Pointer to array of sequence numbers */
+  unsigned int max_behind;     /* How many sequence steps to look behind */
+  int found = 0;               /* Did we find the sequence? */
+  unsigned int i;              /* loop counter */
 
   if (*status != SAI__OK) return;
 
@@ -545,24 +559,79 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
     return;
   }
 
-
-
-  /* have we been given WCS? */
-  if ( freq ) {
-    /* Need to extract astrometry from the FitsChan */
+  /* Check feed range */
+  if ( record->acs_feed >= nreceps_per_obs ) {
+    *status = SAI__ERROR;
+    emsSetu( "NR", nreceps_per_obs );
+    emsSetu( "FEED", record->acs_feed );
+    emsRep( " ", "acsSpecWriteTS called, yet the feed number (^FEED) exceeds the expected number (^NR)",
+	    status );
   }
+
+  /* first thing to do is determine whether this sequence number is new or old */
+
+  if (curpos[subsys] == 0) {
+    /* have not written anything yet so the correct place to write this
+       sequence is at index 0 in the data array (assuming cursize[] is
+       large enough) */
+    seqinc = 1;
+    tindex = 0;
+    printf("First spectrum for this subsystem\n");
+
+  } else {
+    /* if the supplied value is the most recent value then we do not 
+       need to search */
+
+    if (record->rts_num == curseq[subsys]) {
+
+      tindex = curpos[subsys] - 1;
+      /* printf("Reusing sequence %u at index %u\n", curseq[subsys], tindex);*/
+
+    } else {
+
+      /* pointer to array of rts sequence numbers */
+      rtsseqs = extdata[subsys][RTS_NUM];
+
+      /* search back through the list */
+      /* For efficiency, assume that we can't be more than a certain
+	 number of sequence steps behind. */
+      max_behind = ( curpos[subsys] < MAXSEQERR ? curpos[subsys] : MAXSEQERR );
+      found = 0;
+
+      for (i = 0; i < max_behind; i++) {
+	if (record->rts_num == rtsseqs[curpos[subsys]-i]) {
+	  /* found the sequence */
+	  tindex = curpos[subsys] - i;
+	  found = 1;
+	  break;
+	}
+      }
+
+      if (found == 0) {
+	printf("Did not find sequence %u\n", record->rts_num);
+	/* did not find this sequence number so it is a new one */
+	tindex = curpos[subsys]; /* curpos will be incremented */
+	seqinc = 1;
+      } else {
+	/* going back in time so this may not be efficient */
+	printf("Sequence %u matches index %u. Previous seq num=%u\n", 
+	       record->rts_num, tindex, curseq[subsys]);
+	curseq[subsys] = record->rts_num;
+
+      }
+    }
+  }
+  
 
   /* if the sequence number has incremented we need to increase the t-axis counter */
 
-  if ( record->rts_num > curseq[subsys] ) {
+  if (seqinc) {
+
     /* store the new value */
     curseq[subsys] = record->rts_num;
 
     /* increment the counters value */
-    counters[subsys]++;
-
-    /* indicate that we did increment sequence number (and so can write header information) */
-    seqinc = 1;
+    curpos[subsys]++;
 
     /* See if we need to grow */
     /* We can grow either because we have suddenly realised we don't fit *or* because
@@ -574,17 +643,17 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
       reqnum = record->rts_endnum - record->rts_num + 1;
     }
 
-    if ( (counters[subsys] + reqnum - 1) > cursize[subsys] ) {
+    if ( (curpos[subsys] + reqnum - 1) > cursize[subsys] ) {
       /* resize NDF and all data arrays */
 
       /* work out how much to grow:
 	 - use requested size if given and more than 1
 	 - else use NGROW
-	 - make sure we grow by at least counters[subsys]-cursize[subsys]
+	 - make sure we grow by at least curpos[subsys]-cursize[subsys]
       */
 
       if (reqnum > 1) {
-	ngrow = reqnum + counters[subsys] - cursize[subsys] - 1;
+	ngrow = reqnum + curpos[subsys] - cursize[subsys] - 1;
       } else {
 	ngrow = NGROW;
       }
@@ -599,17 +668,16 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
     
     /* Calculate offset into array - number of spectra into the array times number of
        channels per spectrum. */
-    offset = nchans_per_subsys[subsys] *
-      (nreceps_per_obs * (counters[subsys] - 1) + record->acs_feed );
+    offset = calcOffset( nchans_per_subsys[subsys], nreceps_per_obs,
+			 record->acs_feed, tindex, status );
 
     data = spectra[subsys];
     memcpy( &(data[offset]), spectrum, nchans_per_subsys[subsys]*sizeof(float) );
 
     /* Store record data and receptor positions. Base record only updates each
        sequence step but recepot position should be written for all records. */
-    if (seqinc) writeRecord( subsys, record, status );
-    writeRecepPos( subsys, record, status );
-    
+    if (seqinc) writeRecord( subsys, tindex, record, status );
+    writeRecepPos( subsys, tindex, record, status );
 
   }
 
@@ -1091,8 +1159,8 @@ static void closeExtensions( unsigned int subsys, int * status ) {
 
   if ( *status != SAI__OK ) return;
 
-  if (counters[subsys] > 0) {
-    resizeExtensions( subsys, counters[subsys], 0, status );
+  if (curpos[subsys] > 0) {
+    resizeExtensions( subsys, curpos[subsys], 0, status );
   }
 
   /* Free locators */
@@ -1107,7 +1175,7 @@ static void closeExtensions( unsigned int subsys, int * status ) {
   extmapped[subsys] = 0;
 
   /* delete the extension if we never wrote to it */
-  if (counters[subsys] == 0) {
+  if (curpos[subsys] == 0) {
     ndfXdel(indf[subsys], STATEEXT,status);
   }
 
@@ -1117,16 +1185,14 @@ static void closeExtensions( unsigned int subsys, int * status ) {
 
 /* Write ACSISRtsState to file */
 
-static void writeRecord( unsigned int subsys, const ACSISRtsState * record,
+static void writeRecord( unsigned int subsys, unsigned int frame,
+			 const ACSISRtsState * record,
 			 int * status ) {
 
-  unsigned int frame; /* position in data array */
   unsigned int offset;
 
   /* Can not think of anything clever to do */
   if ( *status != SAI__OK ) return;
-
-  frame = counters[subsys] - 1;
 
   /* now copy */
   ((double *)extdata[subsys][POL_ANG])[frame] = record->pol_ang;
@@ -1315,15 +1381,15 @@ static void closeACSISExtensions( unsigned int subsys, int * status ) {
 
   if ( *status != SAI__OK ) return;
 
-  if (counters[subsys] > 0) {
-    resizeACSISExtensions( subsys, counters[subsys], 0, status );
+  if (curpos[subsys] > 0) {
+    resizeACSISExtensions( subsys, curpos[subsys], 0, status );
   }
 
   /* Free locators */
   datAnnul( &(receppos_loc[subsys]), status );
 
   /* delete the receptor positions if never written */
-  if (counters[subsys] == 0) {
+  if (curpos[subsys] == 0) {
     datErase(acsisloc[subsys], "RECEPPOS", status );
   }
 
@@ -1338,14 +1404,15 @@ static void closeACSISExtensions( unsigned int subsys, int * status ) {
 }
 
 /* Write coordinate positions to ACSIS extension */
-static void writeRecepPos( unsigned int subsys, const ACSISRtsState * record, int * status ) {
+static void writeRecepPos( unsigned int subsys, unsigned int frame, 
+			   const ACSISRtsState * record, int * status ) {
   unsigned int offset;
   double *posdata;
 
   if (*status != SAI__OK) return;
 
   /* Calculate offset into data array */
-  offset = 2 * ( (nreceps_per_obs * (counters[subsys]-1) ) + record->acs_feed );
+  offset = calcOffset( 2, nreceps_per_obs, record->acs_feed, frame, status );
 
   posdata = receppos_data[subsys];
   if (posdata != NULL) {
@@ -1379,8 +1446,8 @@ closeNDF( unsigned int subsys, int * status ) {
 
   /* Shrink file to actual size */
   ndfBound(indf[subsys], NDIMS, lbnd, ubnd, &itemp, status );
-  if (counters[subsys] > 0) {
-    ubnd[TDIM] = lbnd[TDIM] + counters[subsys] - 1;
+  if (curpos[subsys] > 0) {
+    ubnd[TDIM] = lbnd[TDIM] + curpos[subsys] - 1;
   } else {
     ubnd[TDIM] = lbnd[TDIM];
   }
@@ -1398,13 +1465,13 @@ closeNDF( unsigned int subsys, int * status ) {
   ndfAnnul( &(indf[subsys]), status );
 
 #if SPW_DEBUG
-  printf("Wrote %d sequence steps to subsystem %d (max was %d)\n", counters[subsys], subsys,
+  printf("Wrote %d sequence steps to subsystem %d (max was %d)\n", curpos[subsys], subsys,
 	 cursize[subsys]);
 #endif
 
   /* Force globals to be reset */
   cursize[subsys] = 0;
-  counters[subsys] = 0;
+  curpos[subsys] = 0;
   spectra[subsys] = NULL;
   indf[subsys] = NDF__NOID;
 
@@ -1490,6 +1557,20 @@ resizeNDF( unsigned int subsys, unsigned int newsize, int * status ) {
   cursize[subsys] = newt;
 
 }
+
+/* Calculate the offset into the 3d data array */
+/* Can be used for nchan * nrecep * t data array. Use zero indexing for nrecep and tindex. */
+
+static unsigned int
+calcOffset( unsigned int nchans, unsigned int maxreceps, unsigned int nrecep, unsigned int tindex,
+	    int *status ) {
+
+  if (*status != SAI__OK) return 0;
+
+  return (nchans * ( maxreceps * tindex + nrecep )); 
+
+}
+
 
 
 /********************************** Debug functions ********************/
