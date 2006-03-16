@@ -18,6 +18,7 @@
 #include "ems.h"
 #include "mers.h"
 #include "prm_par.h"
+#include "star/mem.h"
 
 /* Local includes */
 #include "specwrite.h"
@@ -81,6 +82,10 @@ static unsigned int this_obs_num = 0;
 static unsigned int this_ut = 0; 
 static unsigned int this_subscan = 0;
 
+/* receptor name buffer. Malloced and freed */
+static char* recep_name_buff = NULL;
+static size_t receplen;
+
 
 /* internal prototypes */
 static void writeFitsChan( int indf, const AstFitsChan * fitschan, int * status );
@@ -97,7 +102,7 @@ static char * createSubScanDir( const char * dir, unsigned int yyyymmdd,
 
 static void
 openNDF( unsigned int subsys, unsigned int nrecep, unsigned int nchans,
-	 unsigned int nseq, const char * recepnames[], int * status );
+	 unsigned int nseq, const char recepnames[], size_t receplen, int * status );
 
 static void
 closeNDF( unsigned int subsys, int * status );
@@ -110,7 +115,7 @@ createExtensions( unsigned int subsys, unsigned int size, int * status );
 
 static void
 createACSISExtensions( unsigned int subsys, unsigned int size, unsigned int nrecep, 
-		       const char *recepnames[], int * status );
+		       const char recepnames[], size_t receplen, int * status );
 
 static void resizeExtensions( unsigned int subsys, unsigned int newsize, int remap, 
 			      int * status );
@@ -397,8 +402,10 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 	       const size_t nchans[], unsigned int nseq,
 	       const char *recepnames[], int * status ) {
 
+  char * cpos;                 /* offset into string */
   unsigned int i;              /* Loop counter */
   char * sdir;                 /* subscan directory */
+  size_t len;                  /* temp length */
 
   /* Return immediately if status is bad */
   if (*status != SAI__OK) return;
@@ -437,16 +444,44 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
   /* Reset subscan number */
   this_subscan = 1;
 
-  /* Calculate the number of sequence steps that we are allowed to grow
-     before opening new file. */
+  /* we need to store the receptor names somewhere locally */
+  /* just take the simple approach of a buffer of strings of equal
+     length that we can datPutC */
+  /* find the longest receptor name */
+  receplen = 0;
+  if (recepnames != NULL) {
+    for (i=0; i < nrecep; i++) {
+      len = strlen( recepnames[i] );
+      if (receplen < len ) receplen = len;
+    }
+  }
+
+  /* Allocate memory */
+  if (receplen > 0 ) {
+    if (recep_name_buff != NULL ) {
+      starFree( recep_name_buff );
+    }
+    recep_name_buff = starMalloc( receplen * nrecep );
+
+    /* copy characters into buffer */
+    if (recep_name_buff != NULL) {
+      cpos = recep_name_buff;
+      for (i=0; i<nrecep; i++) {
+	cnfExprt( recepnames[i], cpos, receplen);
+	cpos += receplen;
+      }
+    }
+  }
 
   /* Need an NDF per subsystem */
   for (i = 0; i < nsubsys; i++) {
 
-    /* we need to store the receptor names somewhere locally */
+    /* Calculate the number of sequence steps that we are allowed to grow
+       before opening new file. */
     max_seq[i] = MAXBYTES / ( nrecep * nchans[i] * sizeof(float) );
 
-    openNDF( i, nrecep, nchans[i], nseq, recepnames, status );
+    /* Allocate resources for this subsystem */
+    openNDF( i, nrecep, nchans[i], nseq, recep_name_buff, receplen, status );
 
   }
 
@@ -672,7 +707,7 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
 	this_subscan++;
 	tindex = 0;
 	openNDF( subsys, nreceps_per_obs, nchans_per_subsys[subsys], ngrow, 
-		 NULL, status );
+		 recep_name_buff, receplen, status );
       } else {
 
 	/* Resize the NDF */
@@ -1010,7 +1045,7 @@ createSubScanDir( const char * rootdir, unsigned int yyyymmdd, unsigned int obsn
 
 static void
 openNDF( unsigned int subsys, unsigned int nrecep, unsigned int nchans,
-	 unsigned int nseq, const char * recepnames[], int * status ) {
+	 unsigned int nseq, const char recepnames[], size_t rlen, int * status ) {
 
   void *datapntrs[] = { NULL };/* Array of mapped pointers for ndfMap */
   int itemp;                   /* Temp integer */
@@ -1075,7 +1110,7 @@ openNDF( unsigned int subsys, unsigned int nrecep, unsigned int nchans,
 
   /* Create the ACSIS extension that contains the receptor names and
      positions */
-  createACSISExtensions( subsys, ngrow, nrecep, recepnames, status );
+  createACSISExtensions( subsys, ngrow, nrecep, recepnames, rlen, status );
 
   /* Also need to create the header arrays and map those ! */
   createExtensions( subsys, ngrow, status );
@@ -1293,9 +1328,7 @@ static void writeRecord( unsigned int subsys, unsigned int frame,
 
 static void
 createACSISExtensions( unsigned int subsys, unsigned int size, unsigned int nrecep, 
-		       const char *recepnames[], int * status ) {
-  size_t maxlen = 0;
-  size_t len;
+		       const char recepnames[], size_t rlen, int * status ) {
   unsigned int i;
   char type[DAT__SZTYP+1];   /* constructed type string */
   HDSLoc * temploc = NULL;
@@ -1319,21 +1352,13 @@ createACSISExtensions( unsigned int subsys, unsigned int size, unsigned int nrec
        receptor. This array grows in the same way as JCMTSTATE.
   */
 
-  /* find the longest receptor name */
-  if (recepnames != NULL) {
-    for (i=0; i < nrecep; i++) {
-      len = strlen( recepnames[i] );
-      if (maxlen < len ) maxlen = len;
-    }
-  }
-
   /* Create the receptor component and store the names */
-  if (maxlen > 0) {
-    datCctyp( maxlen, type );
+  if (recepnames) {
+    datCctyp( rlen, type );
     dim[0] = nrecep;
     datNew( acsisloc[subsys], "RECEPTORS", type, 1, dim, status );
     datFind( acsisloc[subsys], "RECEPTORS", &temploc, status );
-    if (recepnames != NULL) datPut1C( temploc, nrecep, recepnames, status );
+    datPut( temploc, type, 1, dim, recepnames, status);
     datAnnul( &temploc, status );
   }
 
