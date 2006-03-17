@@ -1,5 +1,7 @@
 
-#define PACKAGE_VERSION  "V0.1-1"
+#if HAVE_CONFIG_H
+#  include <config.h>
+#endif
 
 /* System includes */
 #include <string.h>
@@ -23,10 +25,18 @@
 /* Local includes */
 #include "specwrite.h"
 
+/* Enable memory cache */
+#define USE_MEMORY_CACHE 1
+
+/* Debug prints */
+
 #define SPW_DEBUG 1
 
 /* Largest file name allowed (including path) */
 #define MAXFILE 1024
+
+/* Define the number of extensions we support */
+#define NEXTENSIONS 39
 
 
 /* Global state variables */
@@ -80,7 +90,7 @@ static int indf[MAXSUBSYS] = { NDF__NOID, NDF__NOID, NDF__NOID, NDF__NOID };
 static char datadir[MAXFILE+1];
 static unsigned int this_obs_num = 0;
 static unsigned int this_ut = 0; 
-static unsigned int this_subscan = 0;
+static unsigned int this_subscan[MAXSUBSYS] = { 0, 0, 0, 0 };
 
 /* receptor name buffer. Malloced and freed */
 static char* recep_name_buff = NULL;
@@ -124,13 +134,32 @@ static void resizeACSISExtensions( unsigned int subsys, unsigned int newsize, in
 static void closeExtensions( unsigned int subsys, int * status );
 static void closeACSISExtensions( unsigned int subsys, int * status );
 
-static void writeRecord( unsigned int subsys, unsigned int tindex,
-			 const ACSISRtsState * record, 
+static void writeRecord( void * basepntr[], unsigned int tindex,
+			 const ACSISRtsState * record,
 			 int * status );
-static void writeRecepPos( unsigned int subsys, unsigned int tindex,
+static void writeRecepPos( double * posdata, unsigned int tindex,
 			   const ACSISRtsState * record, int * status );
 static unsigned int calcOffset( unsigned int nchans, unsigned int maxreceps, unsigned int nrecep, 
 				unsigned int tindex, int *status );
+
+static void allocHeaders( unsigned int subsys, unsigned int size, int * status );
+
+static void
+resizeResources( unsigned int subsys, unsigned int newsize, int * status );
+static void
+allocResources( unsigned int subsys, unsigned int nrecep, unsigned int nchans,
+		unsigned int nseq, const char recepnames[], size_t receplen, int * status );
+
+static void allocPosData( unsigned int subsys, unsigned int nrecep, unsigned int nseq, int * status );
+static void
+flushResources( unsigned int subsys, int * status );
+
+static void copyCache( unsigned int subsys, unsigned int nreceps, unsigned int nchan, 
+		       unsigned int nseq, int * status);
+
+static size_t sizeofHDSType( const char * type, int * status );
+
+static void myRealloc( void **pntr, size_t nbytes, int * status );
 
 #if SPW_DEBUG
 static double duration ( struct timeval * tp1, struct timeval * tp2 );
@@ -165,9 +194,6 @@ static double duration ( struct timeval * tp1, struct timeval * tp2 );
 				      emsSetu( "SB", sub ); \
 				      emsSetu( "MX", (MAXSUBSYS-1) ); \
 				      emsRep( " ", "Subsystem out of range. ^SB > ^MX", st ); }
-
-/* Define the number of extensions we support */
-#define NEXTENSIONS 39
 
 /* Number of dimensions in output NDF */
 #define NDIMS 3
@@ -263,6 +289,9 @@ static const char * hdsRecordNames[NEXTENSIONS][2] =
    { "_REAL", "ENVIRO_AIR_TEMP" },
   };
 
+/* Somewhere to store the precomputed sizes of each HDS element */
+static size_t hdsRecordSizes[NEXTENSIONS];
+
 /* Extension support */
 
 /* Name of STATE and ACSIS extensions - some could almost be shared with SCUBA2... */
@@ -292,6 +321,16 @@ static HDSLoc* receppos_loc[MAXSUBSYS] = { NULL, NULL, NULL, NULL };
 
 /* pointer to mapped RECEPPOS extension */
 static double * receppos_data[MAXSUBSYS] = { NULL, NULL, NULL, NULL };
+
+/* Array of pointers to malloced extensions */
+static void * memextdata[MAXSUBSYS][NEXTENSIONS];
+static double * memrecpos[MAXSUBSYS] = { NULL, NULL, NULL, NULL };
+
+/* Pointer to malloc spectra */
+static float * memspec[MAXSUBSYS] = { NULL, NULL, NULL, NULL };
+
+/* some memory for bad values */
+static float * bad_cache = NULL;
 
 
 /*********************** NDF "cube" FILE *************************************/
@@ -406,6 +445,7 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
   unsigned int i;              /* Loop counter */
   char * sdir;                 /* subscan directory */
   size_t len;                  /* temp length */
+  unsigned int seqcount;       /* Number of Sequences to prealloc */
 
   /* Return immediately if status is bad */
   if (*status != SAI__OK) return;
@@ -432,6 +472,14 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
     }
   }
 
+  /* Pre-calculate the byte sizes of the extensions */
+  /* Loop and create  */
+  for (i=0; i < NEXTENSIONS; i++ ) {
+    /* work out the number of bytes per element */
+    hdsRecordSizes[i] = sizeofHDSType( hdsRecordNames[i][0], status );
+    if (*status != SAI__OK) break;
+  }
+
   /* Create the directory to receive each subscan */
   sdir = createSubScanDir( dir, yyyymmdd, obsnum, status );
 
@@ -440,9 +488,6 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
   datadir[MAXFILE] = '\0';
   this_obs_num = obsnum;
   this_ut = yyyymmdd;
-
-  /* Reset subscan number */
-  this_subscan = 1;
 
   /* we need to store the receptor names somewhere locally */
   /* just take the simple approach of a buffer of strings of equal
@@ -476,14 +521,27 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
   /* Need an NDF per subsystem */
   for (i = 0; i < nsubsys; i++) {
 
+    /* Reset subscan number */
+    this_subscan[i] = 1;
+
     /* Calculate the number of sequence steps that we are allowed to grow
        before opening new file. */
-    max_seq[i] = MAXBYTES / ( nrecep * nchans[i] * sizeof(float) );
+    max_seq[i] = MAXBYTES / ( nrecep * nchans[i] * SIZEOF_FLOAT );
+
+#if USE_MEMORY_CACHE
+    seqcount = max_seq[i];
+#else
+    seqcount = nseq;
+#endif
 
     /* Allocate resources for this subsystem */
-    openNDF( i, nrecep, nchans[i], nseq, recep_name_buff, receplen, status );
+    allocResources( i, nrecep, nchans[i], seqcount, recep_name_buff, receplen, status );
 
+    /* subsystem globals */
+    nchans_per_subsys[i] = nchans[i];
   }
+
+  nreceps_per_obs = nrecep;
 
   /* Complete */
   return;
@@ -578,6 +636,9 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
   unsigned int max_behind;     /* How many sequence steps to look behind */
   int found = 0;               /* Did we find the sequence? */
   unsigned int i;              /* loop counter */
+  double * posdata;
+  void ** recdata;
+  
 
   if (*status != SAI__OK) return;
 
@@ -592,12 +653,18 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
 
   /* Make sure the file is open */
   /* Check to see if we've already been called */
-  if (indf[subsys] == NDF__NOID) {
+  if (indf[subsys] == NDF__NOID && memspec[subsys] == NULL) {
     *status = SAI__ERROR;
     emsSetu("I", subsys);
-    emsRep(" ",
-	   "acsSpecWriteTS called, yet an NDF file has not been opened (subsystem ^I)",
-	   status);
+    if (indf[subsys] == NDF__NOID) {
+      emsRep(" ",
+	     "acsSpecWriteTS called, yet an NDF file has not been opened (subsystem ^I)",
+	     status);
+    } else {
+      emsRep(" ", 
+	     "acsSpecWriteTS call yet no memory has yet been allocated (subsystem ^I)",
+	     status);
+    }
     return;
   }
 
@@ -618,7 +685,7 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
        large enough) */
     seqinc = 1;
     tindex = 0;
-    printf("First spectrum for this subsystem\n");
+    printf("First spectrum for this file for this subsystem\n");
 
   } else {
     /* if the supplied value is the most recent value then we do not 
@@ -632,7 +699,11 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
     } else {
 
       /* pointer to array of rts sequence numbers */
+#if USE_MEMORY_CACHE
+      rtsseqs = memextdata[subsys][RTS_NUM];
+#else
       rtsseqs = extdata[subsys][RTS_NUM];
+#endif
 
       /* search back through the list */
       /* For efficiency, assume that we can't be more than a certain
@@ -703,15 +774,32 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
       /* if this will put us over the limit, close the NDF and reopen a new
 	 one */
       if ( (cursize[subsys] + ngrow ) > max_seq[subsys] ) {
-	closeNDF( subsys, status);
-	this_subscan++;
-	tindex = 0;
-	openNDF( subsys, nreceps_per_obs, nchans_per_subsys[subsys], ngrow, 
-		 recep_name_buff, receplen, status );
-      } else {
 
+	/* this will clear cursize but we need to make sure that it reflects the
+	   actual number of elements written so far, not the position we were
+	   going to write to.*/
+	curpos[subsys]--;
+
+	/* flush what we have to disk */
+	flushResources( subsys, status );
+
+	/* increment scan number and allocate new resources */
+	this_subscan[subsys]++;
+#if USE_MEMORY_CACHE
+	/* always want to make sure we allocate the max amount of memory */
+	ngrow = max_seq[subsys];
+#endif
+	allocResources( subsys, nreceps_per_obs, nchans_per_subsys[subsys],
+			ngrow, recep_name_buff, receplen, status );
+
+	/* indicate that we are starting at the beginning with the next spectrum */
+	tindex = 0;
+
+      } else {
+	printf("Cursize: %u Curpos: %u ngrow: %u max_seq: %u\n",
+	       cursize[subsys], curpos[subsys], ngrow, max_seq[subsys]); 
 	/* Resize the NDF */
-	resizeNDF( subsys, ngrow, status );
+	resizeResources( subsys, ngrow, status );
       }
     }
   }
@@ -724,13 +812,22 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
     offset = calcOffset( nchans_per_subsys[subsys], nreceps_per_obs,
 			 record->acs_feed, tindex, status );
 
+#if USE_MEMORY_CACHE    
+    data = memspec[subsys];
+    recdata = memextdata[subsys];
+    posdata = memrecpos[subsys];
+#else
     data = spectra[subsys];
-    memcpy( &(data[offset]), spectrum, nchans_per_subsys[subsys]*sizeof(float) );
+    recdata = extdata[subsys];
+    posdata = receppos_data[subsys];
+#endif
+
+    memcpy( &(data[offset]), spectrum, nchans_per_subsys[subsys]*SIZEOF_FLOAT );
 
     /* Store record data and receptor positions. Base record only updates each
        sequence step but recepot position should be written for all records. */
-    if (seqinc) writeRecord( subsys, tindex, record, status );
-    writeRecepPos( subsys, tindex, record, status );
+    if (seqinc) writeRecord( recdata, tindex, record, status );
+    writeRecepPos( posdata, tindex, record, status );
 
   }
 
@@ -807,9 +904,9 @@ acsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
   /* Loop over each NDF to write fits header and to close it */
   found = 0;
   for (i = 0; i < maxsubsys; i++) {
-    if ( indf[i] != NDF__NOID ) {
+    if ( indf[i] != NDF__NOID || memspec[i] != NULL) {
       found = 1;
-      closeNDF( i, status );
+      flushResources( i, status);
     }
   }
 
@@ -1064,7 +1161,7 @@ openNDF( unsigned int subsys, unsigned int nrecep, unsigned int nchans,
     emsSetu( "NS", nseq);
     emsSetu( "MAX", max_seq[subsys]);
     emsSetu( "MB", MAXBYTES / (1024*1024));
-    emsRep(" ", "openNDF: Unable to open NDF since the number of sequences to be stored (^NS) already exceeds the maximum allowed (^MAX seq or ^MB megabytes)", status);
+    emsRep(" ", "openNDF: Unable to open NDF since the number of sequences to be stored (^NS) already exceeds the maximum allowed (^MAX seq equivalent to ^MB megabytes)", status);
     return;
   }
 
@@ -1072,7 +1169,7 @@ openNDF( unsigned int subsys, unsigned int nrecep, unsigned int nchans,
   printf("Opening subsystem %d\n",subsys);
 #endif
   /* Name the NDF component */
-  ndfname = getFileName(datadir, this_ut, subsys, this_obs_num, this_subscan, status );
+  ndfname = getFileName(datadir, this_ut, subsys, this_obs_num, this_subscan[subsys], status );
 
   /* Calculate bounds */
   ngrow = (nseq > 0 ? nseq : NGROW );
@@ -1093,12 +1190,10 @@ openNDF( unsigned int subsys, unsigned int nrecep, unsigned int nchans,
 
   /* Update the cursize[] array and the nchans array */
   cursize[subsys] = ubnd[TDIM] - lbnd[TDIM] + 1;
-  nchans_per_subsys[subsys] = ubnd[CHANDIM] - lbnd[CHANDIM] + 1;
-  nreceps_per_obs = ubnd[RECDIM] - lbnd[RECDIM] + 1;
 
   /* History component */
   ndfHcre( indf[subsys], status );
-  ndfHput("NORMAL","ACSIS-DA (" PACKAGE_VERSION ")", 1, 1, history,
+  ndfHput("NORMAL","ACSIS-DA (V" PACKAGE_VERSION ")", 1, 1, history,
 	  0, 0, 0, indf[subsys], status );
   ndfHsmod( "DISABLED", indf[subsys], status );
 
@@ -1249,77 +1344,76 @@ static void closeExtensions( unsigned int subsys, int * status ) {
 
 /* Write ACSISRtsState to file */
 
-static void writeRecord( unsigned int subsys, unsigned int frame,
+static void writeRecord( void * basepntr[], unsigned int frame,
 			 const ACSISRtsState * record,
 			 int * status ) {
-
   unsigned int offset;
 
   /* Can not think of anything clever to do */
   if ( *status != SAI__OK ) return;
 
   /* now copy */
-  ((double *)extdata[subsys][POL_ANG])[frame] = record->pol_ang;
-  ((int *)extdata[subsys][RTS_NUM])[frame] = record->rts_num;
-  ((double *)extdata[subsys][RTS_STEP])[frame] = record->rts_step;
-  ((double *)extdata[subsys][RTS_END])[frame] = record->rts_end;
+  ((double *)basepntr[POL_ANG])[frame] = record->pol_ang;
+  ((int *)basepntr[RTS_NUM])[frame] = record->rts_num;
+  ((double *)basepntr[RTS_STEP])[frame] = record->rts_step;
+  ((double *)basepntr[RTS_END])[frame] = record->rts_end;
 
   cnfExprt( record->rts_tasks,
-	   (char *)extdata[subsys][RTS_TASKS]+
+	   (char *)basepntr[RTS_TASKS]+
 	    SIZEOF_RTS_TASKS*frame,
 	    SIZEOF_RTS_TASKS );
 
-  ((double *)extdata[subsys][SMU_AZ_JIG_X])[frame] = record->smu_az_jig_x;
-  ((double *)extdata[subsys][SMU_AZ_JIG_Y])[frame] = record->smu_az_jig_y;
-  ((double *)extdata[subsys][SMU_X])[frame] = record->smu_x;
-  ((double *)extdata[subsys][SMU_Y])[frame] = record->smu_y;
-  ((double *)extdata[subsys][SMU_Z])[frame] = record->smu_z;
-  ((double *)extdata[subsys][SMU_TR_JIG_X])[frame] = record->smu_tr_jig_x;
-  ((double *)extdata[subsys][SMU_TR_JIG_Y])[frame] = record->smu_tr_jig_y;
-  ((double *)extdata[subsys][TCS_AIRMASS])[frame] = record->tcs_airmass;
+  ((double *)basepntr[SMU_AZ_JIG_X])[frame] = record->smu_az_jig_x;
+  ((double *)basepntr[SMU_AZ_JIG_Y])[frame] = record->smu_az_jig_y;
+  ((double *)basepntr[SMU_X])[frame] = record->smu_x;
+  ((double *)basepntr[SMU_Y])[frame] = record->smu_y;
+  ((double *)basepntr[SMU_Z])[frame] = record->smu_z;
+  ((double *)basepntr[SMU_TR_JIG_X])[frame] = record->smu_tr_jig_x;
+  ((double *)basepntr[SMU_TR_JIG_Y])[frame] = record->smu_tr_jig_y;
+  ((double *)basepntr[TCS_AIRMASS])[frame] = record->tcs_airmass;
 
   cnfExprt(record->tcs_az_sys,
-	   (char *)extdata[subsys][TCS_AZ_SYS]+SIZEOF_TCS_AZ_SYS*frame, 
+	   (char *)basepntr[TCS_AZ_SYS]+SIZEOF_TCS_AZ_SYS*frame, 
 	   SIZEOF_TCS_AZ_SYS );
 
-  ((double *)extdata[subsys][TCS_AZ_ANG])[frame] = record->tcs_az_ang;
-  ((double *)extdata[subsys][TCS_AZ_AC1])[frame] = record->tcs_az_ac1;
-  ((double *)extdata[subsys][TCS_AZ_AC2])[frame] = record->tcs_az_ac2;
-  ((double *)extdata[subsys][TCS_AZ_DC1])[frame] = record->tcs_az_dc1;
-  ((double *)extdata[subsys][TCS_AZ_DC2])[frame] = record->tcs_az_dc2;
-  ((double *)extdata[subsys][TCS_AZ_BC1])[frame] = record->tcs_az_bc1;
-  ((double *)extdata[subsys][TCS_AZ_BC2])[frame] = record->tcs_az_bc2;
-  ((int *)extdata[subsys][TCS_INDEX])[frame] = record->tcs_index;
+  ((double *)basepntr[TCS_AZ_ANG])[frame] = record->tcs_az_ang;
+  ((double *)basepntr[TCS_AZ_AC1])[frame] = record->tcs_az_ac1;
+  ((double *)basepntr[TCS_AZ_AC2])[frame] = record->tcs_az_ac2;
+  ((double *)basepntr[TCS_AZ_DC1])[frame] = record->tcs_az_dc1;
+  ((double *)basepntr[TCS_AZ_DC2])[frame] = record->tcs_az_dc2;
+  ((double *)basepntr[TCS_AZ_BC1])[frame] = record->tcs_az_bc1;
+  ((double *)basepntr[TCS_AZ_BC2])[frame] = record->tcs_az_bc2;
+  ((int *)basepntr[TCS_INDEX])[frame] = record->tcs_index;
   cnfExprt ( record->tcs_source,
-	     (char *)extdata[subsys][TCS_SOURCE]+SIZEOF_TCS_SOURCE*frame, 
+	     (char *)basepntr[TCS_SOURCE]+SIZEOF_TCS_SOURCE*frame, 
 	     SIZEOF_TCS_SOURCE );
 
   cnfExprt ( record->tcs_tr_sys,
-	     (char *)extdata[subsys][TCS_TR_SYS]+SIZEOF_TCS_TR_SYS*frame, 
+	     (char *)basepntr[TCS_TR_SYS]+SIZEOF_TCS_TR_SYS*frame, 
 	     SIZEOF_TCS_TR_SYS );
 
-  ((double *)extdata[subsys][TCS_TR_ANG])[frame] = record->tcs_tr_ang;
-  ((double *)extdata[subsys][TCS_TR_AC1])[frame] = record->tcs_tr_ac1;
-  ((double *)extdata[subsys][TCS_TR_AC2])[frame] = record->tcs_tr_ac2;
-  ((double *)extdata[subsys][TCS_TR_DC1])[frame] = record->tcs_tr_dc1;
-  ((double *)extdata[subsys][TCS_TR_DC2])[frame] = record->tcs_tr_dc2;
-  ((double *)extdata[subsys][TCS_TR_BC1])[frame] = record->tcs_tr_bc1;
-  ((double *)extdata[subsys][TCS_TR_BC2])[frame] = record->tcs_tr_bc2;
+  ((double *)basepntr[TCS_TR_ANG])[frame] = record->tcs_tr_ang;
+  ((double *)basepntr[TCS_TR_AC1])[frame] = record->tcs_tr_ac1;
+  ((double *)basepntr[TCS_TR_AC2])[frame] = record->tcs_tr_ac2;
+  ((double *)basepntr[TCS_TR_DC1])[frame] = record->tcs_tr_dc1;
+  ((double *)basepntr[TCS_TR_DC2])[frame] = record->tcs_tr_dc2;
+  ((double *)basepntr[TCS_TR_BC1])[frame] = record->tcs_tr_bc1;
+  ((double *)basepntr[TCS_TR_BC2])[frame] = record->tcs_tr_bc2;
 
   cnfExprt( record->acs_source_ro,
-	    (char*)extdata[subsys][ACS_SOURCE_RO]+ SIZEOF_ACS_SOURCE_RO*frame,
+	    (char*)basepntr[ACS_SOURCE_RO]+ SIZEOF_ACS_SOURCE_RO*frame,
 	    SIZEOF_ACS_SOURCE_RO );
   cnfExprt( record->acs_source_rp,
-	    (char*)extdata[subsys][ACS_SOURCE_RP]+ SIZEOF_ACS_SOURCE_RP*frame,
+	    (char*)basepntr[ACS_SOURCE_RP]+ SIZEOF_ACS_SOURCE_RP*frame,
 	    SIZEOF_ACS_SOURCE_RP );
 
-  ((int *)extdata[subsys][ACS_DRCONTROL])[frame] = record->acs_drcontrol;
-  ((float *)extdata[subsys][ACS_TSYS])[frame] = record->acs_tsys;
-  ((float *)extdata[subsys][ACS_TRX])[frame] = record->acs_trx;
+  ((int *)basepntr[ACS_DRCONTROL])[frame] = record->acs_drcontrol;
+  ((float *)basepntr[ACS_TSYS])[frame] = record->acs_tsys;
+  ((float *)basepntr[ACS_TRX])[frame] = record->acs_trx;
 
-  ((float *)extdata[subsys][ENVIRO_AIR_TEMP])[frame] = record->enviro_air_temp;
-  ((float *)extdata[subsys][ENVIRO_PRESSURE])[frame] = record->enviro_pressure;
-  ((float *)extdata[subsys][ENVIRO_REL_HUM])[frame] = record->enviro_rel_hum;
+  ((float *)basepntr[ENVIRO_AIR_TEMP])[frame] = record->enviro_air_temp;
+  ((float *)basepntr[ENVIRO_PRESSURE])[frame] = record->enviro_pressure;
+  ((float *)basepntr[ENVIRO_REL_HUM])[frame] = record->enviro_rel_hum;
 
 }
 
@@ -1459,23 +1553,21 @@ static void closeACSISExtensions( unsigned int subsys, int * status ) {
 }
 
 /* Write coordinate positions to ACSIS extension */
-static void writeRecepPos( unsigned int subsys, unsigned int frame, 
+static void writeRecepPos( double * posdata, unsigned int frame, 
 			   const ACSISRtsState * record, int * status ) {
   unsigned int offset;
-  double *posdata;
 
   if (*status != SAI__OK) return;
 
   /* Calculate offset into data array */
   offset = calcOffset( 2, nreceps_per_obs, record->acs_feed, frame, status );
 
-  posdata = receppos_data[subsys];
   if (posdata != NULL) {
     posdata[offset] = record->acs_feedx;
     posdata[offset+1] = record->acs_feedy;
   } else {
     *status = SAI__ERROR;
-    emsRep( " ", "Attempted to write receptor positions but no data array mapped",
+    emsRep( " ", "Attempted to write receptor positions but no data array available",
 	    status );
   }
 
@@ -1525,9 +1617,8 @@ closeNDF( unsigned int subsys, int * status ) {
 #endif
 
   /* Force globals to be reset */
-  cursize[subsys] = 0;
-  curpos[subsys] = 0;
   spectra[subsys] = NULL;
+  cursize[subsys] = 0;
   indf[subsys] = NDF__NOID;
 
   if (*status != SAI__OK) {
@@ -1623,6 +1714,195 @@ calcOffset( unsigned int nchans, unsigned int maxreceps, unsigned int nrecep, un
   if (*status != SAI__OK) return 0;
 
   return (nchans * ( maxreceps * tindex + nrecep )); 
+
+}
+
+
+/* Allocate resources for spectrum */
+
+static void
+allocResources( unsigned int subsys, unsigned int nrecep, unsigned int nchans,
+		unsigned int nseq, const char recepnames[], size_t receplen, int * status ) {
+
+#if USE_MEMORY_CACHE
+  unsigned int seq;
+  size_t nbytes;
+  void * tempp;
+  int myerr;
+#endif
+
+  if (*status != SAI__OK) return;
+
+#if USE_MEMORY_CACHE
+  
+  seq = ( nseq == 0 ? max_seq[subsys] : nseq );
+  nbytes = seq * nrecep * nchans * SIZEOF_FLOAT;
+
+  myRealloc( (void**)&(memspec[subsys]), nbytes, status );
+
+  allocHeaders(subsys, seq, status );
+  allocPosData(subsys, nrecep, seq, status );
+  cursize[subsys] = seq;
+
+#else
+  openNDF( subsys, nrecep, nchans, nseq, recepnames, receplen, status );
+#endif
+}
+
+static void
+resizeResources( unsigned int subsys, unsigned int newsize, int * status ) {
+  if (*status != SAI__OK) return;
+
+#if USE_MEMORY_CACHE
+  /* Currently a bug since the memory should not be realloced */
+  *status = SAI__ERROR;
+  emsRep(" ", "Should never be requested to realloc global buffer. Internal programming error",
+	 status );
+#else
+  resizeNDF( subsys, newsize, status );
+#endif
+
+}
+
+static void
+flushResources( unsigned int subsys, int * status ) {
+
+#if USE_MEMORY_CACHE
+  openNDF( subsys, nreceps_per_obs, nchans_per_subsys[subsys], 
+	   curpos[subsys], recep_name_buff, receplen, status);
+  copyCache( subsys, nreceps_per_obs, nchans_per_subsys[subsys],
+	     curpos[subsys], status );
+
+#endif
+
+  closeNDF( subsys, status );
+
+  /* New position in buffer is the beginning */
+  curpos[subsys] = 0;
+
+}
+
+/* 
+   Create space for the header information of specified size.
+   Pointers stored in memextdata.
+*/
+
+static void
+allocHeaders( unsigned int subsys, unsigned int size, int * status ) {
+
+  int j;
+  size_t sizeofx;
+
+  if (*status != SAI__OK) return;
+
+  /* Make sure all are initialised */
+  for (j=0; j < NEXTENSIONS; j++) {
+    memextdata[subsys][j] = NULL;
+  }
+
+  /* Loop and create  */
+  for (j=0; j < NEXTENSIONS; j++ ) {
+
+    /* work out the number of bytes per element */
+    sizeofx = sizeofHDSType( hdsRecordNames[j][0], status );
+
+    if (*status != SAI__OK) break;
+    
+    /* get some memory */
+    myRealloc( &(memextdata[subsys][j]), size * hdsRecordSizes[j], status );
+
+  }
+
+  if (*status != SAI__OK) emsRep( " ", "allocHeaders: Unable to malloc memory for headers", status );
+
+}
+
+/* Allocate memory for the positional data */
+
+static void allocPosData( unsigned int subsys, unsigned int nrecep, unsigned int nseq, int * status ) {
+  size_t nbytes;
+
+  if (*status != SAI__OK) return;
+
+  nbytes = 2 * nrecep * nseq * SIZEOF_DOUBLE;
+  myRealloc( (void**)&(memrecpos[subsys]), nbytes, status );
+
+}
+
+/* re-allocate memory and set status - *pntr must be valid or NULL */
+static void myRealloc( void ** pntr, size_t nbytes, int * status ) {
+  void * tmpp;
+
+  if (*status != SAI__OK) return;
+
+  tmpp = starRealloc( *pntr, nbytes );
+  if (tmpp == NULL) {
+    *status = SAI__ERROR;
+    emsSyser( "MSG", errno );
+    emsSeti64( "NB", (int64_t)nbytes );
+    emsRep( " ", "Unable to allocate ^NB bytes - ^MSG", status );
+    starFree( *pntr );
+    *pntr = NULL;
+  } else {
+    *pntr = tmpp;
+  }
+
+}
+
+/* size of each type */
+
+static size_t sizeofHDSType( const char * type, int * status ) {
+
+  size_t retval = 0;
+
+  switch( type[1] ) {
+  case 'D':
+    /* HDS sizes are known in advance */
+    retval = 8;
+    break;
+  case 'I':
+  case 'R':
+    retval = 4;
+    break;
+  case 'C':
+    /* offset past the _CHAR* */
+    retval = strtol( &(type[6]) , NULL, 10);
+    if (retval == 0) {
+      *status = SAI__ERROR;
+      emsSyser( "MESSAGE", errno );
+      emsSetc( "TYP", type );
+      emsRep(" ", "Unable to determine length of string '^TYP' - ^MESSAGE", status );
+    }
+    break;
+  default:
+    *status = SAI__ERROR;
+    emsSetc( "TYP", type );
+    emsRep( " ", "Error determining size of supplied type '^TYP'", status );
+  }
+
+  return retval;
+
+}
+
+/* Copy from malloced buffers to mapped buffers */
+
+static void copyCache( unsigned int subsys, unsigned int nreceps, unsigned int nchan, 
+		       unsigned int nseq, int * status) {
+  unsigned int i;
+
+
+  if (*status != SAI__OK) return;
+
+  /* Copy the main data array */
+  memcpy( spectra[subsys], memspec[subsys], nreceps * nchan * nseq * SIZEOF_FLOAT );
+
+  /* sequence data */
+  for (i=0; i<NEXTENSIONS; i++) {
+    memcpy( extdata[subsys][i], memextdata[subsys][i], nseq * hdsRecordSizes[i] );
+  }
+
+  /* receptor positions */
+  memcpy( receppos_data[subsys], memrecpos[subsys], nreceps * 2 * nseq * SIZEOF_DOUBLE );
 
 }
 
