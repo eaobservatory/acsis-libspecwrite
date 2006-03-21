@@ -150,6 +150,7 @@ static void
 allocResources( unsigned int subsys, unsigned int nrecep, unsigned int nchans,
 		unsigned int nseq, const char recepnames[], size_t receplen, int * status );
 
+static void freeResources ( unsigned int subsys, int * status);
 static void allocPosData( unsigned int subsys, unsigned int nrecep, unsigned int nseq, int * status );
 static void
 flushResources( unsigned int subsys, int * status );
@@ -330,7 +331,7 @@ static double * memrecpos[MAXSUBSYS] = { NULL, NULL, NULL, NULL };
 static float * memspec[MAXSUBSYS] = { NULL, NULL, NULL, NULL };
 
 /* some memory for bad values */
-static float * bad_cache = NULL;
+static float * bad_cache[MAXSUBSYS] = { NULL, NULL, NULL, NULL };
 
 
 /*********************** NDF "cube" FILE *************************************/
@@ -345,7 +346,7 @@ static float * bad_cache = NULL;
 #define NGROW  (MAXRATE * PRESIZETIME)
 
 /* Number of bytes we should write before opening a new file */
-#define MAXBYTES ( 100 * 1024 * 1024 )
+#define MAXBYTES ( 500 * 1024 * 1024 )
 
 /* maximum number of sequence steps we can get out of sequence */
 #define MAXSEQERR  5
@@ -443,9 +444,11 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 
   char * cpos;                 /* offset into string */
   unsigned int i;              /* Loop counter */
+  unsigned int j;              /* Loop counter */
   char * sdir;                 /* subscan directory */
   size_t len;                  /* temp length */
   unsigned int seqcount;       /* Number of Sequences to prealloc */
+  unsigned int nperseq;        /* Number of elements per sequence */
 
   /* Return immediately if status is bad */
   if (*status != SAI__OK) return;
@@ -501,7 +504,7 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
     }
   }
 
-  /* Allocate memory */
+  /* Allocate memory for the receptor names */
   if (receplen > 0 ) {
     if (recep_name_buff != NULL ) {
       starFree( recep_name_buff );
@@ -521,12 +524,28 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
   /* Need an NDF per subsystem */
   for (i = 0; i < nsubsys; i++) {
 
+    /* Number of data values per sequence */
+    nperseq = nrecep * nchans[i];
+
     /* Reset subscan number */
     this_subscan[i] = 1;
 
     /* Calculate the number of sequence steps that we are allowed to grow
        before opening new file. */
-    max_seq[i] = MAXBYTES / ( nrecep * nchans[i] * SIZEOF_FLOAT );
+    max_seq[i] = MAXBYTES / ( nperseq * SIZEOF_FLOAT );
+
+    /* Allocate a cache of bad values to simplify initialisation */
+    bad_cache[i] = starMalloc( nperseq * SIZEOF_FLOAT );
+    if (bad_cache[i] == NULL) {
+      if (*status == SAI__OK) {
+	*status = SAI__ERROR;
+	emsRep(" ","Unable to allocate memory for bad value cache", status );
+	break;
+      }
+    }
+    for (j=0; j<nperseq; j++) {
+      (bad_cache[i])[j] = VAL__BADR;
+    }
 
 #if USE_MEMORY_CACHE
     seqcount = max_seq[i];
@@ -541,6 +560,7 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
     nchans_per_subsys[i] = nchans[i];
   }
 
+  /* Store number of receptors */
   nreceps_per_obs = nrecep;
 
   /* Complete */
@@ -908,6 +928,7 @@ acsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
       found = 1;
       flushResources( i, status);
     }
+    freeResources( i, status );
   }
 
   /* report error if not found any open NDFs */
@@ -1427,6 +1448,7 @@ createACSISExtensions( unsigned int subsys, unsigned int size, unsigned int nrec
   char type[DAT__SZTYP+1];   /* constructed type string */
   HDSLoc * temploc = NULL;
   hdsdim dim[3];
+  size_t nelem;
 
   if (*status != SAI__OK) return;
 
@@ -1468,6 +1490,14 @@ createACSISExtensions( unsigned int subsys, unsigned int size, unsigned int nrec
     acsismapped[subsys] = 0;
     receppos_data[subsys] = NULL;
   } else {
+
+    /* Copy in bad values - unroll since we know there is always a 2 */
+    nelem = dim[0] * dim[1] * dim[2];
+    for (i=0; i < nelem; i+=2) {
+      (receppos_data[subsys])[i] = VAL__BADD;
+      (receppos_data[subsys])[i+1] = VAL__BADD;
+    }
+
     acsismapped[subsys] = 1;
   }
   
@@ -1490,10 +1520,12 @@ resizeACSISExtensions( unsigned int subsys, unsigned int newsize,
   hdsdim dim[3];
   size_t ndim = 3;
   int actdim;
+  unsigned int j;
+  unsigned int oldsize;
+  unsigned int ndoubles;
+  unsigned int start;
 
   if (*status != SAI__OK) return;
-
-  dim[0] = newsize;
 
   if (acsismapped[subsys])
     datUnmap( receppos_loc[subsys], status );
@@ -1509,6 +1541,7 @@ resizeACSISExtensions( unsigned int subsys, unsigned int newsize,
   }
 
   /* resize */
+  oldsize = dim[ndim-1];
   dim[ndim-1] = newsize;
   datAlter( receppos_loc[subsys], ndim, dim, status);
 
@@ -1516,6 +1549,18 @@ resizeACSISExtensions( unsigned int subsys, unsigned int newsize,
     /* remap - assume this should be done after resizing all */
     datMapD( receppos_loc[subsys], "WRITE",
 	     ndim, dim, &(receppos_data[subsys]), status );
+
+    if (*status == SAI__OK) {
+      /* fill with bad values since may not get all receptors */
+      ndoubles = dim[0] * (newsize-oldsize) * dim[1];
+      start = calcOffset( dim[0], dim[1], 0, oldsize, status );
+      if (*status == SAI__OK) {
+	for (j=0; j < ndoubles; j++) {
+	  (receppos_data[subsys])[start+j] = VAL__BADD;
+	}
+      }
+    }
+
   }
 
   if (*status != SAI__OK)
@@ -1641,6 +1686,11 @@ resizeNDF( unsigned int subsys, unsigned int newsize, int * status ) {
   unsigned int newt;
   int itemp;
   void *datapntrs[] = { NULL };/* Array of mapped pointers for ndfMap */
+  size_t nbytes;
+  unsigned int ncells;
+  unsigned int offset;
+  float * pos;
+  unsigned int i;
 
   /* Unmap the data array */
 #if SPW_DEBUG
@@ -1695,6 +1745,21 @@ resizeNDF( unsigned int subsys, unsigned int newsize, int * status ) {
   TIMEME("Remp NDF", ndfMap( indf[subsys], "DATA", "_REAL", "WRITE", datapntrs, &itemp, status ););
   spectra[subsys] = datapntrs[0];
 
+  /* Initialise the new memory to bad */
+  ncells = ( ubnd[RECDIM] - lbnd[RECDIM] + 1 ) *
+    (ubnd[CHANDIM] - lbnd[CHANDIM] + 1);
+  nbytes = ncells * SIZEOF_FLOAT;
+  offset = calcOffset( (ubnd[CHANDIM]-lbnd[CHANDIM]+1),
+		       (ubnd[RECDIM]-lbnd[RECDIM]+1),
+		       0, (newt-newsize+1), status); 
+  if (*status == SAI__OK) {
+    pos = &((spectra[subsys])[offset]);
+    for (i = 0; i < newsize; i++) {
+      memcpy( pos, bad_cache[subsys], nbytes);
+      pos += ncells;
+    }
+  }
+
   /* Resize the extensions */
   TIMEME("Resize extensions", resizeExtensions( subsys, newt, 1, status  ););
   TIMEME("Resize coords", resizeACSISExtensions( subsys, newt, 1, status  ););
@@ -1726,27 +1791,55 @@ allocResources( unsigned int subsys, unsigned int nrecep, unsigned int nchans,
 
 #if USE_MEMORY_CACHE
   unsigned int seq;
-  size_t nbytes;
   void * tempp;
   int myerr;
 #endif
+  unsigned int ncells;
+  size_t nbytes;
+  float * pos;
+  unsigned int i;
+
 
   if (*status != SAI__OK) return;
 
 #if USE_MEMORY_CACHE
   
   seq = ( nseq == 0 ? max_seq[subsys] : nseq );
-  nbytes = seq * nrecep * nchans * SIZEOF_FLOAT;
 
-  myRealloc( (void**)&(memspec[subsys]), nbytes, status );
+  if (cursize[subsys] != seq) {
+    nbytes = seq * nrecep * nchans * SIZEOF_FLOAT;
+    myRealloc( (void**)&(memspec[subsys]), nbytes, status );
 
-  allocHeaders(subsys, seq, status );
-  allocPosData(subsys, nrecep, seq, status );
+    allocHeaders(subsys, seq, status );
+    allocPosData(subsys, nrecep, seq, status );
+  }
+
+  /* Record the new size */
   cursize[subsys] = seq;
 
 #else
+  /* Opening a new NDF will automatically initialise it to zero
+     so we need to make sure it is BAD later on */
   openNDF( subsys, nrecep, nchans, nseq, recepnames, receplen, status );
 #endif
+
+  /* initialise all the spectra to bad in case we miss a receptor 
+     in the sequence */
+#if USE_MEMORY_CACHE
+  pos = memspec[subsys];
+#else
+  pos = spectra[subsys];
+#endif
+
+  ncells = nrecep * nchans;
+  nbytes = ncells * SIZEOF_FLOAT;
+  if (*status == SAI__OK) {
+    for (i = 0; i < cursize[subsys] ; i++) {
+      memcpy( pos, bad_cache[subsys], nbytes );
+      pos += ncells;
+    }
+  }
+
 }
 
 static void
@@ -1782,6 +1875,37 @@ flushResources( unsigned int subsys, int * status ) {
 
 }
 
+static void freeResources ( unsigned int subsys, int * status) {
+#if USE_MEMORY_CACHE
+  unsigned int i;
+#endif
+
+  /* Do not use status since we want to free the memory */
+
+#if USE_MEMORY_CACHE
+  if ( memspec[subsys] != NULL) {
+    starFree( memspec[subsys]);
+    memspec[subsys] = NULL;
+  }
+  for (i=0; i<NEXTENSIONS; i++) {
+    if (memextdata[subsys][i] != NULL) {
+      starFree( memextdata[subsys][i] );
+      memextdata[subsys][i] = NULL;
+    }
+  }
+  if (memrecpos[subsys] != NULL) {
+    starFree( memrecpos[subsys] );
+    memrecpos[subsys] = NULL;
+  }
+#endif
+
+  if (bad_cache[subsys] != NULL) {
+    starFree( bad_cache[subsys] );
+    bad_cache[subsys] = NULL;
+  }
+
+}
+
 /* 
    Create space for the header information of specified size.
    Pointers stored in memextdata.
@@ -1809,6 +1933,7 @@ allocHeaders( unsigned int subsys, unsigned int size, int * status ) {
     if (*status != SAI__OK) break;
     
     /* get some memory */
+    /* Do not need to initialise since we always populate it */
     myRealloc( &(memextdata[subsys][j]), size * hdsRecordSizes[j], status );
 
   }
@@ -1821,11 +1946,19 @@ allocHeaders( unsigned int subsys, unsigned int size, int * status ) {
 
 static void allocPosData( unsigned int subsys, unsigned int nrecep, unsigned int nseq, int * status ) {
   size_t nbytes;
+  unsigned int ndoubles;
+  unsigned int i;
 
   if (*status != SAI__OK) return;
 
-  nbytes = 2 * nrecep * nseq * SIZEOF_DOUBLE;
+  ndoubles = 2 * nrecep * nseq;
+  nbytes = ndoubles * SIZEOF_DOUBLE;
   myRealloc( (void**)&(memrecpos[subsys]), nbytes, status );
+
+  /* Initialise since we can not guarantee that each receptor will get a coordinate */
+  for (i=0; i<ndoubles; i++) {
+    (memrecpos[subsys])[i] = VAL__BADD;
+  }
 
 }
 
