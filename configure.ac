@@ -25,7 +25,12 @@ AC_FC_LIBRARY_LDFLAGS
 
 dnl    Check if sys/wait.h exists and is POSIX compatible
 AC_HEADER_STDC
- 
+
+dnl    Variable sizes
+AC_CHECK_SIZEOF(float)
+AC_CHECK_SIZEOF(double)
+AC_CHECK_SIZEOF(int)
+
 STAR_CNF_COMPATIBLE_SYMBOLS
  
 dnl    Declare the build and use dependencies for this package
