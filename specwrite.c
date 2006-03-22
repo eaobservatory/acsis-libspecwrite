@@ -1900,6 +1900,12 @@ static void freeResources ( unsigned int subsys, int * status) {
     bad_cache[subsys] = NULL;
   }
 
+  if (recep_name_buff != NULL) {
+    starFree( recep_name_buff );
+    recep_name_buff = NULL;
+    receplen = 0;
+  }
+
 }
 
 /* 
