@@ -1088,22 +1088,23 @@ static char * getFileRoot( unsigned int yyyymmdd, unsigned int subsys,
 }
 
 /* Form the directory name
+   To comply with the SCUBA-2 ICD we only use the observation number when
+   constructing the directory name.
+
    - returns a pointer to static memory.
  */
 
 static char * getDirName( const char * dir, unsigned int yyyymmdd,
-			   unsigned int obsnum, int * status ) {
+			  unsigned int obsnum, int * status ) {
 
   static char dirname[MAXFILE]; /* buffer for dirname - will be returned */
   int flen;                        /* Length of string */
   char * root;                   /* Root filename */
 
   if (*status != SAI__OK) return NULL;
-  root = getFileRoot( yyyymmdd, 0, obsnum, 0, status );
-  if (*status != SAI__OK) return NULL;
 
   /* Form the file name - assume posix filesystem */
-  flen = snprintf(dirname, MAXFILE, "%s/%s", dir, root );
+  flen = snprintf(dirname, MAXFILE, "%s/%05u", dir, obsnum );
 
   if (flen >= MAXFILE) {
     *status = SAI__ERROR;
