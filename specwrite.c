@@ -26,7 +26,7 @@
 #include "specwrite.h"
 
 /* Enable memory cache */
-#define USE_MEMORY_CACHE 0
+#define USE_MEMORY_CACHE 1
 
 /* Debug prints */
 
