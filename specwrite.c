@@ -658,7 +658,7 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
   unsigned int i;              /* loop counter */
   double * posdata;
   void ** recdata;
-  
+  unsigned int startind;
 
   if (*status != SAI__OK) return;
 
@@ -714,7 +714,7 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
     if (record->rts_num == curseq[subsys]) {
 
       tindex = curpos[subsys] - 1;
-      /* printf("Reusing sequence %u at index %u\n", curseq[subsys], tindex);*/
+       printf("Reusing sequence %u at index %u\n", curseq[subsys], tindex);
 
     } else {
 
@@ -728,13 +728,13 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
       /* search back through the list */
       /* For efficiency, assume that we can't be more than a certain
 	 number of sequence steps behind. */
-      max_behind = ( curpos[subsys] < MAXSEQERR ? curpos[subsys]-1 : MAXSEQERR );
+      max_behind = ( curpos[subsys] < MAXSEQERR ? curpos[subsys] : MAXSEQERR );
+      startind = curpos[subsys];
       found = 0;
-
-      for (i = 0; i < max_behind; i++) {
-	if (record->rts_num == rtsseqs[curpos[subsys]-i]) {
+      for (i = 1; i < max_behind; i++) {
+	if (record->rts_num == rtsseqs[startind-i]) {
 	  /* found the sequence */
-	  tindex = curpos[subsys] - i;
+	  tindex = startind - i;
 	  found = 1;
 	  break;
 	}
