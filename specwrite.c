@@ -26,7 +26,7 @@
 #include "specwrite.h"
 
 /* Enable memory cache */
-#define USE_MEMORY_CACHE 1
+#define USE_MEMORY_CACHE 0
 
 /* Debug prints */
 
@@ -1749,7 +1749,7 @@ resizeNDF( unsigned int subsys, unsigned int newsize, int * status ) {
   nbytes = ncells * SIZEOF_FLOAT;
   offset = calcOffset( (ubnd[CHANDIM]-lbnd[CHANDIM]+1),
 		       (ubnd[RECDIM]-lbnd[RECDIM]+1),
-		       0, (newt-newsize+1), status); 
+		       0, (newt-newsize), status); 
   if (*status == SAI__OK) {
     pos = &((spectra[subsys])[offset]);
     for (i = 0; i < newsize; i++) {
