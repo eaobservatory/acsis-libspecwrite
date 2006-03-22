@@ -714,7 +714,7 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
     if (record->rts_num == curseq[subsys]) {
 
       tindex = curpos[subsys] - 1;
-       printf("Reusing sequence %u at index %u\n", curseq[subsys], tindex);
+      /* printf("Reusing sequence %u at index %u\n", curseq[subsys], tindex);*/
 
     } else {
 
