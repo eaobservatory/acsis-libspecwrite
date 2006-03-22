@@ -728,7 +728,7 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
       /* search back through the list */
       /* For efficiency, assume that we can't be more than a certain
 	 number of sequence steps behind. */
-      max_behind = ( curpos[subsys] < MAXSEQERR ? curpos[subsys] : MAXSEQERR );
+      max_behind = ( curpos[subsys] < MAXSEQERR ? curpos[subsys]-1 : MAXSEQERR );
       found = 0;
 
       for (i = 0; i < max_behind; i++) {
@@ -1368,8 +1368,6 @@ static void closeExtensions( unsigned int subsys, int * status ) {
 static void writeRecord( void * basepntr[], unsigned int frame,
 			 const ACSISRtsState * record,
 			 int * status ) {
-  unsigned int offset;
-
   /* Can not think of anything clever to do */
   if ( *status != SAI__OK ) return;
 
@@ -1791,8 +1789,6 @@ allocResources( unsigned int subsys, unsigned int nrecep, unsigned int nchans,
 
 #if USE_MEMORY_CACHE
   unsigned int seq;
-  void * tempp;
-  int myerr;
 #endif
   unsigned int ncells;
   size_t nbytes;
