@@ -53,12 +53,10 @@
 /* Some sizes used for dimensioning the string arrays */
 #define SIZEOF_RTS_TASKS  80
 #define SIZEOF_RTS_ERRS   80
-#define SIZEOF_TCS_AZ_SYS 16
 #define SIZEOF_TCS_SOURCE 32
 #define SIZEOF_TCS_TR_SYS 16
 #define SIZEOF_ACS_RECEPTOR   5
-#define SIZEOF_ACS_SOURCE_RO  32
-#define SIZEOF_ACS_SOURCE_RP  10
+#define SIZEOF_ACS_SOURCE_RO  16
 
 /* Public data structures */
 
@@ -67,7 +65,6 @@ typedef struct ACSISRtsState {
   double pol_ang;
   unsigned int rts_num;
   unsigned int rts_endnum;  /* Highest number expected in this sequence */
-  double rts_step;
   double rts_end;    /* MJD TAI of end of sequence step */
   char   rts_tasks[SIZEOF_RTS_TASKS + 1];
   char   rts_errs[SIZEOF_RTS_ERRS + 1];
@@ -83,7 +80,6 @@ typedef struct ACSISRtsState {
   double smu_tr_chop_x;
   double smu_tr_chop_y;
   double tcs_airmass;
-  char   tcs_az_sys[SIZEOF_TCS_AZ_SYS+1];
   double tcs_az_ang;
   double tcs_az_ac1;
   double tcs_az_ac2;
@@ -108,7 +104,6 @@ typedef struct ACSISRtsState {
   float acs_tsys;
   float acs_trx;
   char  acs_source_ro[SIZEOF_ACS_SOURCE_RO+1];
-  char  acs_source_rp[SIZEOF_ACS_SOURCE_RP+1];
   int   acs_spec_window_id;
   int   acs_drcontrol;
   double acs_feedx;  /* Y coordinate of feed "acs_feed" */
