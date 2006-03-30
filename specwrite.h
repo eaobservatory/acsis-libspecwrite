@@ -11,7 +11,7 @@
 *     Define the public C interface to the HDS spectrum writing ACSIS functions
 
 *  Invocation:
-*     #include "hdsspec.h"
+*     #include "acsis/specwrite.h"
 
 *  Language:
 *     C Include file
@@ -68,6 +68,7 @@ typedef struct ACSISRtsState {
   double rts_end;    /* MJD TAI of end of sequence step */
   char   rts_tasks[SIZEOF_RTS_TASKS + 1];
   char   rts_errs[SIZEOF_RTS_ERRS + 1];
+  int    smu_jig_index;
   double smu_az_jig_x;
   double smu_az_jig_y;
   double smu_az_chop_x;
@@ -106,6 +107,10 @@ typedef struct ACSISRtsState {
   char  acs_source_ro[SIZEOF_ACS_SOURCE_RO+1];
   int   acs_spec_window_id;
   int   acs_drcontrol;
+  int   acs_no_prev_refs;
+  int   acs_no_next_refs;
+  int   acs_no_ons;
+  float acs_exposure;
   double acs_feedx;  /* Y coordinate of feed "acs_feed" */
   double acs_feedy;  /* Y coordinate of feed "acs_feed" */
 } ACSISRtsState;
