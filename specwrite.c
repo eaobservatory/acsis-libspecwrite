@@ -38,9 +38,6 @@
 /* Define the number of extensions we support */
 #define NEXTENSIONS 34
 
-
-/* Global state variables */
-
 /* Maximum number of subsystems we can handle 
    We know that ACSIS can have at most 4 spectral subsystems
    and they will not change during a single observation. */
@@ -48,54 +45,62 @@
 #define MAXSUBSYS 4
 static const unsigned int maxsubsys = MAXSUBSYS;
 
-/* Lookup table to enable us to name the files for each subsystem */
-static const char subsysprefix[MAXSUBSYS] = { 'a', 'b', 'c', 'd' };
+/* Global state variables */
 
-/* Current sequence number (so that we know when we need to increment
-   the time axis "counters") Note that the sequence number will not be
-   sequential and will not start at zero. It will just guarantee to be
-   at least the same as the previous value (for multi-receptor
-   observations).
-*/
-static unsigned int curseq[MAXSUBSYS] = { 0,0,0,0 };
+/* This struct gives an overview of the observation state itself */
+typedef struct obsData {
+  /* number of receptors in this observation */
+  unsigned int nrecep;
+  size_t receplen;       /* longest receptor name */
+  char * recep_name_buff;  /* buffer for receptor names */
+  char datadir[MAXFILE+1];   /* current data directory */
+  /* observation number, ut date and subscan number */
+  unsigned int obsnum;
+  unsigned int yyyymmdd;
+  unsigned int nsubsys; /* Actual number of subsystems in use */
+} obsData;
 
-/* t- Position to write next sequence - Fortran indexing */
-/* This is where new sequences will end up */
-static unsigned int curpos[MAXSUBSYS] = { 0, 0, 0, 0 };
+/* actual data (either in memory or mapped from disk) */
+typedef struct specData {
+  float  * spectra;  /* Array of data to receive spectra ( nchans x nrecep x nseq) */
+  double * receppos; /* Receptor positions (2 x  nrecep x nseq) */
+  void   * jcmtstate[NEXTENSIONS];  /* Pointers to JCMTSTATE information */
+  float  * bad;      /* array of bad values to easily initialise new time slice */
+} specData;
 
-/* Current size of NDF for each subsystem */
-static unsigned int cursize[MAXSUBSYS] = { 0, 0, 0, 0 };
+/* This struct contains file information (ndf identifiers, hds locators) */
+typedef struct fileInfo {
+  unsigned int subscan;  /* current subscan number */
+  int indf;   /* NDF identifier for this file */
+  HDSLoc * extloc;  /* JCMSTATE extension locator */
+  HDSLoc * acsisloc; /* ACSIS extension locator */
+  HDSLoc * extlocators[NEXTENSIONS]; /* Locators to each JCMTSTATE component */
+  HDSLoc * receppos_loc;   /* Locators to each .MORE.ACSIS.RECEPPOS */  
+  int extmapped;  /* JCMTSTATE extension is mapped */
+  int acsismapped; /* ACSIS extension is mapped */
+} fileInfo;
 
-/* Number of channels expected for each subsystem */
-static unsigned int nchans_per_subsys[MAXSUBSYS] = { 0, 0, 0, 0 };
 
-/* Number of receptors in this particular observation */
-static unsigned int nreceps_per_obs = 0;
+/* This struct contains all the information required for a single subsystem */
+typedef struct subSystem {
+  unsigned int index;   /* The subsystem "index" for this subsystem 0, 1, 2, or 3 */
+  unsigned int maxsize; /* Maximum allowed size */
+  unsigned int cursize; /* Number of sequence steps available */
+  unsigned int curseq;  /* current RTS sequence number */
+  unsigned int curpos;  /* current index position in the cube (water mark level) */
+  unsigned int nchans;  /* number of spectral channels in this subsystem */
+  specData     tdata;   /* Actual data */        
+  fileInfo     file;    /* File data (can be none if file.infd == NDF__NOID) */
+} subSystem;
 
-/* Maximum number of sequence steps allowed per subsys before
-   a new file is required */
-static unsigned int max_seq[MAXSUBSYS] = { 0, 0, 0, 0 };
+/* Now pre allocate the required number of subsystems */
+subSystem SUBSYS[MAXSUBSYS]; /* subsystem information that is being added to */
+subSystem FILEDATA[MAXSUBSYS];
+obsData   OBSINFO;           /* Global observation information */
 
-/* Pointer into mapped data array for each subsystem */
-static float * spectra[MAXSUBSYS] = { NULL, NULL, NULL, NULL };
-
-/* Array of Ast framesets dealing with the spectral axis. */
-
-static AstFrameSet* frameset_cache[MAXSUBSYS] = { NULL, NULL, NULL, NULL };
-
-/* NDF identifier of spectrum file (if used). One NDF per subsystem. */
-static int indf[MAXSUBSYS] = { NDF__NOID, NDF__NOID, NDF__NOID, NDF__NOID };
-
-/* Information required to construct a filename */
-static char datadir[MAXFILE+1];
-static unsigned int this_obs_num = 0;
-static unsigned int this_ut = 0; 
-static unsigned int this_subscan[MAXSUBSYS] = { 0, 0, 0, 0 };
-
-/* receptor name buffer. Malloced and freed */
-static char* recep_name_buff = NULL;
-static size_t receplen;
-
+/* Status flags */
+unsigned int INPROGRESS = 0; /* true if an observation is in progress */
+unsigned int CALLED = 0;     /* has openTS been called at least once */
 
 /* internal prototypes */
 static void writeFitsChan( int indf, const AstFitsChan * fitschan, int * status );
@@ -106,57 +111,55 @@ static char * getDirName( const char * dir, unsigned int yyyymmdd,
 static char * getFileRoot( unsigned int yyyymmdd, unsigned int subsys,
 			   unsigned int obsnum, unsigned int subscan, int * status );
 
-static char * createSubScanDir( const char * dir, unsigned int yyyymmdd, 
-				unsigned int obsnum,
-				int * status );
+static char * createSubScanDir( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
+				int *status);
 
 static void
-openNDF( unsigned int subsys, unsigned int nrecep, unsigned int nchans,
-	 unsigned int nseq, const char recepnames[], size_t receplen, int * status );
+openNDF( const obsData * obsinfo, const subSystem * template, subSystem * file,
+	 unsigned int nseq, int * status );
 
 static void
-closeNDF( unsigned int subsys, int * status );
+closeNDF( subSystem * subsys, int * status );
 
 static void
-resizeNDF( unsigned int subsys, unsigned int newsize, int * status );
+resizeNDF( const obsData * obsinfo, subSystem * subsys, unsigned int newsize, int * status );
 
 static void
-createExtensions( unsigned int subsys, unsigned int size, int * status );
+createExtensions( subSystem * subsys, unsigned int size, int * status );
 
 static void
-createACSISExtensions( unsigned int subsys, unsigned int size, unsigned int nrecep, 
-		       const char recepnames[], size_t receplen, int * status );
+createACSISExtensions( const obsData * obsinfo, subSystem * subsys, unsigned int size, int * status );
 
-static void resizeExtensions( unsigned int subsys, unsigned int newsize, int remap, 
+static void resizeExtensions( subSystem * subsys, unsigned int newsize, int remap, 
 			      int * status );
-static void resizeACSISExtensions( unsigned int subsys, unsigned int newsize, int remap, 
+static void resizeACSISExtensions( subSystem * subsys, unsigned int newsize, int remap, 
 			      int * status );
-static void closeExtensions( unsigned int subsys, int * status );
-static void closeACSISExtensions( unsigned int subsys, int * status );
+static void closeExtensions( subSystem * subsys, int * status );
+static void closeACSISExtensions( subSystem * subsys, int * status );
 
 static void writeRecord( void * basepntr[], unsigned int tindex,
 			 const ACSISRtsState * record,
 			 int * status );
-static void writeRecepPos( double * posdata, unsigned int tindex,
+static void writeRecepPos( const obsData * obsinfo, double * posdata, unsigned int tindex,
 			   const ACSISRtsState * record, int * status );
 static unsigned int calcOffset( unsigned int nchans, unsigned int maxreceps, unsigned int nrecep, 
 				unsigned int tindex, int *status );
 
-static void allocHeaders( unsigned int subsys, unsigned int size, int * status );
+static void allocHeaders( subSystem *subsys, unsigned int size, int * status );
 
 static void
-resizeResources( unsigned int subsys, unsigned int newsize, int * status );
+resizeResources( const obsData * obsinfo, subSystem * subsys, unsigned int newsize, int * status );
 static void
-allocResources( unsigned int subsys, unsigned int nrecep, unsigned int nchans,
-		unsigned int nseq, const char recepnames[], size_t receplen, int * status );
+allocResources( const obsData * obsinfo, subSystem *subsys, unsigned int nseq,
+		int * status );
 
-static void freeResources ( unsigned int subsys, int * status);
-static void allocPosData( unsigned int subsys, unsigned int nrecep, unsigned int nseq, int * status );
+static void freeResources ( obsData * obsinfo, subSystem * subsys, int * status);
+static void allocPosData( const obsData *obsinfo, subSystem *subsys, unsigned int nseq, int * status );
 static void
-flushResources( unsigned int subsys, int * status );
+flushResources( const obsData * obsinfo, subSystem * subsys, int * status );
 
-static void copyCache( unsigned int subsys, unsigned int nreceps, unsigned int nchan, 
-		       unsigned int nseq, int * status);
+static void copyCache( const obsData * obsinfo, const subSystem * input,
+		       subSystem * output, unsigned int nseq, int * status);
 
 static size_t sizeofHDSType( const char * type, int * status );
 
@@ -288,41 +291,8 @@ static size_t hdsRecordSizes[NEXTENSIONS];
 /* Name of STATE and ACSIS extensions - some could almost be shared with SCUBA2... */
 #define STATEEXT   "JCMTSTATE"
 #define STATEEXTTYPE "RTS_ARR"
-
 #define ACSISEXT   "ACSIS"
 #define ACSISEXTTYP "ACSIS_COMP"
-
-/* Locator to extensions */
-static HDSLoc * extloc[MAXSUBSYS] = { NULL, NULL, NULL, NULL };
-static HDSLoc * acsisloc[MAXSUBSYS] = { NULL, NULL, NULL, NULL };
-
-/* Flag to indicate that extensions are mapped */
-static int extmapped[MAXSUBSYS] = { 0, 0, 0, 0 };
-static int acsismapped[MAXSUBSYS] = { 0, 0, 0, 0 };
-
-/* Array of HDS locators to each of the extensions - different for each
- subsystem. */
-static HDSLoc* extlocators[MAXSUBSYS][NEXTENSIONS];
-
-/* Array of pointers to the mapped extensions */
-static void * extdata[MAXSUBSYS][NEXTENSIONS];
-
-/* HDS locator to RECEPPOS extension */
-static HDSLoc* receppos_loc[MAXSUBSYS] = { NULL, NULL, NULL, NULL };
-
-/* pointer to mapped RECEPPOS extension */
-static double * receppos_data[MAXSUBSYS] = { NULL, NULL, NULL, NULL };
-
-/* Array of pointers to malloced extensions */
-static void * memextdata[MAXSUBSYS][NEXTENSIONS];
-static double * memrecpos[MAXSUBSYS] = { NULL, NULL, NULL, NULL };
-
-/* Pointer to malloc spectra */
-static float * memspec[MAXSUBSYS] = { NULL, NULL, NULL, NULL };
-
-/* some memory for bad values */
-static float * bad_cache[MAXSUBSYS] = { NULL, NULL, NULL, NULL };
-
 
 /*********************** NDF "cube" FILE *************************************/
 
@@ -393,6 +363,8 @@ static float * bad_cache[MAXSUBSYS] = { NULL, NULL, NULL, NULL };
 *  History:
 *     27-FEB-2006 (TIMJ):
 *        Original version.
+*     05-APR-2006 (TIMJ):
+*        Use structured globals
 
 *  Notes:
 *     - Currently only one spectrum file can be open for write at any
@@ -423,6 +395,12 @@ static float * bad_cache[MAXSUBSYS] = { NULL, NULL, NULL, NULL };
 *     Software Foundation, Inc., 59 Temple Place, Suite 330, Boston,
 *     MA 02111-1307, USA
 
+*  Global Variables:
+*     OBSINFO
+*     SUBSYS
+*     hdsRecordName      (readonly)
+*     NEXTENSIONS        (readonly)
+
 *-
 */
 
@@ -432,13 +410,15 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 	       const size_t nchans[], unsigned int nseq,
 	       const char *recepnames[], int * status ) {
 
-  char * cpos;                 /* offset into string */
+  char * cpos = NULL;          /* offset into string */
   unsigned int i;              /* Loop counter */
   unsigned int j;              /* Loop counter */
-  char * sdir;                 /* subscan directory */
+  char * sdir = NULL;          /* subscan directory */
   size_t len;                  /* temp length */
-  unsigned int seqcount;       /* Number of Sequences to prealloc */
+  size_t receplen;             /* Length of longest receptor name */
   unsigned int nperseq;        /* Number of elements per sequence */
+  char * recep_name_buff = NULL; /* Malloced buffer for receptor names */
+  subSystem * subsys = NULL;   /* Individual subsystem */
 
   /* Return immediately if status is bad */
   if (*status != SAI__OK) return;
@@ -454,33 +434,37 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
   }
 
   /* Check to see if we've already been called */
-  for (i = 0; i < nsubsys; i++) {
-    if (indf[i] != NDF__NOID) {
-      *status = SAI__ERROR;
-      emsSetu("I", i);
-      emsRep("HDS_SPEC_OPENTS_ERR1",
-	     "acsSpecOpenTS called, yet an NDF file is already open (subsystem ^I)",
-	     status);
-      return;
-    }
+  if (INPROGRESS != 0) {
+    *status = SAI__ERROR;
+    emsRep("HDS_SPEC_OPENTS_ERR1",
+	   "acsSpecOpenTS called, yet an observation is already in progress", status);
+    return;
   }
 
   /* Pre-calculate the byte sizes of the extensions */
   /* Loop and create  */
-  for (i=0; i < NEXTENSIONS; i++ ) {
-    /* work out the number of bytes per element */
-    hdsRecordSizes[i] = sizeofHDSType( hdsRecordNames[i][0], status );
-    if (*status != SAI__OK) break;
+  if (!CALLED) {
+    CALLED = 1;
+    for (i=0; i < NEXTENSIONS; i++ ) {
+      /* work out the number of bytes per element */
+      hdsRecordSizes[i] = sizeofHDSType( hdsRecordNames[i][0], status );
+      if (*status != SAI__OK) break;
+    }
   }
+
+  /* Populate the observation info structure */
+  OBSINFO.yyyymmdd = yyyymmdd;
+  OBSINFO.obsnum   = obsnum;
+  OBSINFO.nsubsys  = nsubsys;
+  OBSINFO.nrecep  = nrecep;
 
   /* Create the directory to receive each subscan */
   sdir = createSubScanDir( dir, yyyymmdd, obsnum, status );
 
-  /* Store the global observation state */
-  strncpy( datadir, sdir, MAXFILE );
-  datadir[MAXFILE] = '\0';
-  this_obs_num = obsnum;
-  this_ut = yyyymmdd;
+  /* Store the resulting directory */
+  strncpy(OBSINFO.datadir, sdir, MAXFILE);
+  (OBSINFO.datadir)[MAXFILE] = '\0';
+
 
   /* we need to store the receptor names somewhere locally */
   /* just take the simple approach of a buffer of strings of equal
@@ -496,9 +480,6 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 
   /* Allocate memory for the receptor names */
   if (receplen > 0 ) {
-    if (recep_name_buff != NULL ) {
-      starFree( recep_name_buff );
-    }
     recep_name_buff = starMalloc( receplen * nrecep );
 
     /* copy characters into buffer */
@@ -511,22 +492,33 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
     }
   }
 
+  /* Store receptor information */
+  OBSINFO.receplen = receplen;
+  OBSINFO.recep_name_buff = recep_name_buff;
+
   /* Need an NDF per subsystem */
   for (i = 0; i < nsubsys; i++) {
+
+    /* Select the subsystem to modify */
+    subsys = &(SUBSYS[i]);
+
+    /* zero it out */
+    memset( subsys, 0, sizeof(*subsys));
+
+    /* Some intialisation */
+    subsys->nchans = nchans[i];
+    subsys->index = i;
 
     /* Number of data values per sequence */
     nperseq = nrecep * nchans[i];
 
-    /* Reset subscan number */
-    this_subscan[i] = 1;
-
     /* Calculate the number of sequence steps that we are allowed to grow
        before opening new file. */
-    max_seq[i] = MAXBYTES / ( nperseq * SIZEOF_FLOAT );
+    subsys->maxsize = MAXBYTES / ( nperseq * SIZEOF_FLOAT );
 
     /* Allocate a cache of bad values to simplify initialisation */
-    bad_cache[i] = starMalloc( nperseq * SIZEOF_FLOAT );
-    if (bad_cache[i] == NULL) {
+    subsys->tdata.bad = starMalloc( nperseq * SIZEOF_FLOAT );
+    if (subsys->tdata.bad == NULL) {
       if (*status == SAI__OK) {
 	*status = SAI__ERROR;
 	emsRep(" ","Unable to allocate memory for bad value cache", status );
@@ -534,24 +526,16 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
       }
     }
     for (j=0; j<nperseq; j++) {
-      (bad_cache[i])[j] = VAL__BADR;
+      (subsys->tdata.bad)[j] = VAL__BADR;
     }
 
-#if USE_MEMORY_CACHE
-    seqcount = max_seq[i];
-#else
-    seqcount = nseq;
-#endif
-
     /* Allocate resources for this subsystem */
-    allocResources( i, nrecep, nchans[i], seqcount, recep_name_buff, receplen, status );
+    allocResources( &OBSINFO, subsys, subsys->maxsize, status );
 
-    /* subsystem globals */
-    nchans_per_subsys[i] = nchans[i];
   }
 
-  /* Store number of receptors */
-  nreceps_per_obs = nrecep;
+  /* indicate that an observation is now ready */
+  INPROGRESS = 1;
 
   /* Complete */
   return;
@@ -602,6 +586,8 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 *  History:
 *     27-FEB-2006 (TIMJ):
 *        Original version.
+*     05-APR-2006 (TIMJ):
+*        Use structured globals
 
 *  Notes:
 *     - Must have previously called acsSpecOpenTS.
@@ -630,7 +616,7 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 */
 
 void
-acsSpecWriteTS( unsigned int subsys, const float spectrum[], 
+acsSpecWriteTS( unsigned int subsysnum, const float spectrum[], 
 		const ACSISRtsState* record,
 		const AstFitsChan * freq, int * status ) {
 
@@ -649,47 +635,42 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
   double * posdata;
   void ** recdata;
   unsigned int startind;
+  subSystem * subsys;
 
   if (*status != SAI__OK) return;
 
   /* make sure that the subsys number is in range */
-  if ( subsys >= maxsubsys ) {
+  if ( subsysnum >= maxsubsys ) {
     *status = SAI__ERROR;
-    emsSetu("IN", subsys);
+    emsSetu("IN", subsysnum);
     emsSeti("MAX", maxsubsys-1);
     emsRep(" ","acsSpecWriteTS: Supplied subsystem number (^IN) exceeds max allowed (^MAX)", status);
     return;
   }
 
-  /* Make sure the file is open */
   /* Check to see if we've already been called */
-  if (indf[subsys] == NDF__NOID && memspec[subsys] == NULL) {
+  if (!INPROGRESS) {
     *status = SAI__ERROR;
-    emsSetu("I", subsys);
-    if (indf[subsys] == NDF__NOID) {
-      emsRep(" ",
-	     "acsSpecWriteTS called, yet an NDF file has not been opened (subsystem ^I)",
-	     status);
-    } else {
-      emsRep(" ", 
-	     "acsSpecWriteTS call yet no memory has yet been allocated (subsystem ^I)",
-	     status);
-    }
+    emsRep("HDS_SPEC_WRITETS_ERR1",
+	   "acsSpecWriteTS called, yet an observation has not been initialised", status);
     return;
   }
 
   /* Check feed range */
-  if ( record->acs_feed >= nreceps_per_obs ) {
+  if ( record->acs_feed >= OBSINFO.nrecep ) {
     *status = SAI__ERROR;
-    emsSetu( "NR", nreceps_per_obs );
+    emsSetu( "NR", OBSINFO.nrecep - 1 );
     emsSetu( "FEED", record->acs_feed );
     emsRep( " ", "acsSpecWriteTS called, yet the feed number (^FEED) exceeds the expected number (^NR)",
 	    status );
   }
 
+  /* Get local copy of subsystem from global */
+  subsys = &(SUBSYS[subsysnum]);
+
   /* first thing to do is determine whether this sequence number is new or old */
 
-  if (curpos[subsys] == 0) {
+  if (subsys->curpos == 0) {
     /* have not written anything yet so the correct place to write this
        sequence is at index 0 in the data array (assuming cursize[] is
        large enough) */
@@ -701,25 +682,21 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
     /* if the supplied value is the most recent value then we do not 
        need to search */
 
-    if (record->rts_num == curseq[subsys]) {
+    if (record->rts_num == subsys->curseq) {
 
-      tindex = curpos[subsys] - 1;
+      tindex = subsys->curpos - 1;
       /* printf("Reusing sequence %u at index %u\n", curseq[subsys], tindex);*/
 
     } else {
 
       /* pointer to array of rts sequence numbers */
-#if USE_MEMORY_CACHE
-      rtsseqs = memextdata[subsys][RTS_NUM];
-#else
-      rtsseqs = extdata[subsys][RTS_NUM];
-#endif
+      rtsseqs = (subsys->tdata.jcmtstate)[RTS_NUM];
 
       /* search back through the list */
       /* For efficiency, assume that we can't be more than a certain
 	 number of sequence steps behind. */
-      max_behind = ( curpos[subsys] < MAXSEQERR ? curpos[subsys] : MAXSEQERR );
-      startind = curpos[subsys];
+      max_behind = ( subsys->curpos < MAXSEQERR ? subsys->curpos : MAXSEQERR );
+      startind = subsys->curpos;
       found = 0;
       for (i = 1; i < max_behind; i++) {
 	if (record->rts_num == rtsseqs[startind-i]) {
@@ -733,13 +710,13 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
       if (found == 0) {
 	printf("Did not find sequence %u\n", record->rts_num);
 	/* did not find this sequence number so it is a new one */
-	tindex = curpos[subsys]; /* curpos will be incremented */
+	tindex = subsys->curpos; /* curpos will be incremented */
 	seqinc = 1;
       } else {
 	/* going back in time so this may not be efficient */
 	printf("Sequence %u matches index %u. Previous seq num=%u\n", 
-	       record->rts_num, tindex, curseq[subsys]);
-	curseq[subsys] = record->rts_num;
+	       record->rts_num, tindex, subsys->curseq);
+	subsys->curseq = record->rts_num;
 
       }
     }
@@ -751,10 +728,10 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
   if (seqinc) {
 
     /* store the new value */
-    curseq[subsys] = record->rts_num;
+    subsys->curseq = record->rts_num;
 
     /* increment the counters value */
-    curpos[subsys]++;
+    (subsys->curpos)++;
 
     /* See if we need to grow */
     /* We can grow either because we have suddenly realised we don't fit *or* because
@@ -766,50 +743,47 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
       reqnum = record->rts_endnum - record->rts_num + 1;
     }
 
-    if ( (curpos[subsys] + reqnum - 1) > cursize[subsys] ) {
+    if ( (subsys->curpos + reqnum - 1) > subsys->cursize ) {
       /* resize NDF and all data arrays */
 
       /* work out how much to grow:
 	 - use requested size if given and more than 1
 	 - else use NGROW
-	 - make sure we grow by at least curpos[subsys]-cursize[subsys]
+	 - make sure we grow by at least subsys->curpos-cursize[subsys]
       */
 
       if (reqnum > 1) {
-	ngrow = reqnum + curpos[subsys] - cursize[subsys] - 1;
+	ngrow = reqnum + subsys->curpos - subsys->cursize - 1;
       } else {
 	ngrow = NGROW;
       }
 
       /* if this will put us over the limit, close the NDF and reopen a new
 	 one */
-      if ( (cursize[subsys] + ngrow ) > max_seq[subsys] ) {
+      if ( (subsys->cursize + ngrow ) > subsys->maxsize ) {
 
 	/* this will clear cursize but we need to make sure that it reflects the
 	   actual number of elements written so far, not the position we were
 	   going to write to.*/
-	curpos[subsys]--;
+	subsys->curpos--;
 
 	/* flush what we have to disk */
-	flushResources( subsys, status );
+	flushResources( &OBSINFO, subsys, status );
 
-	/* increment scan number and allocate new resources */
-	this_subscan[subsys]++;
 #if USE_MEMORY_CACHE
 	/* always want to make sure we allocate the max amount of memory */
-	ngrow = max_seq[subsys];
+	ngrow = subsys->maxsize;
 #endif
-	allocResources( subsys, nreceps_per_obs, nchans_per_subsys[subsys],
-			ngrow, recep_name_buff, receplen, status );
+	allocResources( &OBSINFO, subsys, ngrow, status );
 
 	/* indicate that we are starting at the beginning with the next spectrum */
 	tindex = 0;
 
       } else {
-	printf("Cursize: %u Curpos: %u ngrow: %u max_seq: %u\n",
-	       cursize[subsys], curpos[subsys], ngrow, max_seq[subsys]); 
+	printf("Cursize: %u Curpos: %u ngrow: %u maxsize: %u\n",
+	       subsys->cursize, subsys->curpos, ngrow, subsys->maxsize); 
 	/* Resize the NDF */
-	resizeResources( subsys, ngrow, status );
+	resizeResources( &OBSINFO, subsys, ngrow, status );
       }
     }
   }
@@ -819,25 +793,19 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
     
     /* Calculate offset into array - number of spectra into the array times number of
        channels per spectrum. */
-    offset = calcOffset( nchans_per_subsys[subsys], nreceps_per_obs,
+    offset = calcOffset( subsys->nchans, OBSINFO.nrecep,
 			 record->acs_feed, tindex, status );
 
-#if USE_MEMORY_CACHE    
-    data = memspec[subsys];
-    recdata = memextdata[subsys];
-    posdata = memrecpos[subsys];
-#else
-    data = spectra[subsys];
-    recdata = extdata[subsys];
-    posdata = receppos_data[subsys];
-#endif
+    data = (subsys->tdata.spectra);
+    recdata = (subsys->tdata.jcmtstate);
+    posdata = (subsys->tdata.receppos);
 
-    memcpy( &(data[offset]), spectrum, nchans_per_subsys[subsys]*SIZEOF_FLOAT );
+    memcpy( &(data[offset]), spectrum, subsys->nchans*SIZEOF_FLOAT );
 
     /* Store record data and receptor positions. Base record only updates each
        sequence step but recepot position should be written for all records. */
     if (seqinc) writeRecord( recdata, tindex, record, status );
-    writeRecepPos( posdata, tindex, record, status );
+    writeRecepPos( &OBSINFO, posdata, tindex, record, status );
 
   }
 
@@ -874,6 +842,8 @@ acsSpecWriteTS( unsigned int subsys, const float spectrum[],
 *  History:
 *     27-FEB-2006 (TIMJ):
 *        Original version.
+*     20-APR-2006 (TIMJ):
+*        Use structured globals.
 
 *  Notes:
 *     - Must have previously called acsSpecOpenTS.
@@ -907,18 +877,30 @@ acsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
 
   unsigned int i;           /* Loop counter */
   int found = 0;            /* Found an open NDF? */
+  subSystem * subsys;       /* specific subsystem */
 
   /* Always check status on entry */
   if (*status != SAI__OK) return;
 
+  /* Check to see if we've already been called */
+  if (!INPROGRESS) {
+    *status = SAI__ERROR;
+    emsRep("HDS_SPEC_CLOSETS_ERR1",
+	   "acsSpecCloseTS called, yet an observation has not been initialised", status);
+    return;
+  }
+
+
   /* Loop over each NDF to write fits header and to close it */
   found = 0;
   for (i = 0; i < maxsubsys; i++) {
-    if ( indf[i] != NDF__NOID || memspec[i] != NULL) {
+    /* Get local copy of subsystem from global */
+    subsys = &(SUBSYS[i]);
+    if ( subsys->file.indf != NDF__NOID || subsys->tdata.spectra != NULL) {
       found = 1;
-      flushResources( i, status);
+      flushResources( &OBSINFO, subsys, status);
     }
-    freeResources( i, status );
+    freeResources( &OBSINFO, subsys, status );
   }
 
   /* report error if not found any open NDFs */
@@ -937,8 +919,11 @@ acsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
 
   /* Force globals to be reset */
   for (i = 0; i < maxsubsys; i++) {
-    nchans_per_subsys[i] = 0;
+    memset( &(SUBSYS[i]), 0, sizeof(SUBSYS[i]) );
   }
+
+  /* reset progress */
+  INPROGRESS = 0;
 
   if (*status != SAI__OK) {
     emsRep( " ", "Error closing Spectrum file", status );
@@ -1058,9 +1043,9 @@ static char * getFileRoot( unsigned int yyyymmdd, unsigned int subsys,
   /* Form the file name - assume posix filesystem */
   if (*status == SAI__OK) {
     if (subscan > 0) {
-      flen = snprintf(rootname, MAXFILE, "a%c%d_%05d_%04d", subsysprefix[subsys], yyyymmdd, obsnum, subscan );
+      flen = snprintf(rootname, MAXFILE, "a%u_%05u_%02u_%04u", yyyymmdd, obsnum, subsys, subscan );
     } else {
-      flen = snprintf(rootname, MAXFILE, "a%d_%05d", yyyymmdd, obsnum );
+      flen = snprintf(rootname, MAXFILE, "a%u_%05u", yyyymmdd, obsnum );
     }
   }
 
@@ -1150,17 +1135,25 @@ createSubScanDir( const char * rootdir, unsigned int yyyymmdd, unsigned int obsn
 
 }
 
-/* Open an NDF file for that subsystem */
+/* Open an NDF file for that subsystem
+   - note that we pass in a subsystem struct for the template
+     and populate a subsystem struct corresponding to the file on disk
+     The "file" struct should have been initialised since subscan number
+     is extracted from it. "template" can be the same struct as "file"
+     so you can still use a file as memory cache.
+   - The template is simply used to work out how big the output file should
+     be.
+*/
 
 static void
-openNDF( unsigned int subsys, unsigned int nrecep, unsigned int nchans,
-	 unsigned int nseq, const char recepnames[], size_t rlen, int * status ) {
+openNDF( const obsData * obsinfo, const subSystem * template, subSystem * file,
+	 unsigned int nseq, int * status ) {
 
   void *datapntrs[] = { NULL };/* Array of mapped pointers for ndfMap */
   int itemp;                   /* Temp integer */
   int lbnd[NDIMS];             /* Lower pixel bounds */
   char *ndfname;               /* NDF filename */
-  unsigned int ngrow;   /* Initial size to grow array */
+  unsigned int ngrow;          /* Initial size to grow array */
   int place;                   /* NDF placeholder */
   int ubnd[NDIMS];             /* upper pixel bounds */
   char * history[1] = { "ACSIS Data Acquistion" };
@@ -1168,29 +1161,39 @@ openNDF( unsigned int subsys, unsigned int nrecep, unsigned int nchans,
 
   if (*status != SAI__OK) return;
 
-  if (nseq > max_seq[subsys]) {
+  if (nseq > template->maxsize) {
     *status = SAI__ERROR;
     emsSetu( "NS", nseq);
-    emsSetu( "MAX", max_seq[subsys]);
+    emsSetu( "MAX", template->maxsize );
     emsSetu( "MB", MAXBYTES / (1024*1024));
     emsRep(" ", "openNDF: Unable to open NDF since the number of sequences to be stored (^NS) already exceeds the maximum allowed (^MAX seq equivalent to ^MB megabytes)", status);
     return;
   }
 
+  /* increment subscan number for this file - we assume it has got the correct previous
+     value - should this explicitly come from the template? */
+  (file->file.subscan)++;
+
 #if SPW_DEBUG
-  printf("Opening subsystem %d\n",subsys);
+  printf("Opening file associated with subsystem %d (subscan %u)\n",template->index, file->file.subscan);
 #endif
   /* Name the NDF component */
-  ndfname = getFileName(datadir, this_ut, subsys, this_obs_num, this_subscan[subsys], status );
+  ndfname = getFileName(obsinfo->datadir, obsinfo->yyyymmdd, template->index, obsinfo->obsnum,
+			file->file.subscan, status);
 
   /* Calculate bounds */
   ngrow = (nseq > 0 ? nseq : NGROW );
   lbnd[RECDIM] = 1;
   lbnd[CHANDIM] = 1;
   lbnd[TDIM] = 1;
-  ubnd[RECDIM] = nrecep;
-  ubnd[CHANDIM] = nchans;
+  ubnd[RECDIM] = obsinfo->nrecep;
+  ubnd[CHANDIM] = template->nchans;
   ubnd[TDIM] = ngrow;
+
+  /* Make sure that "file" gets values from "template" */
+  file->index = template->index;
+  file->maxsize = template->maxsize;
+  file->nchans = template->nchans;
 
 #if SPW_DEBUG
   printf("Opening NDF file '%s' to default size of %u sequence steps\n", ndfname, ngrow);
@@ -1198,29 +1201,31 @@ openNDF( unsigned int subsys, unsigned int nrecep, unsigned int nchans,
 
   /* create the NDF */
   ndfPlace( NULL, ndfname, &place, status );
-  ndfNew( "_REAL", NDIMS, lbnd, ubnd, &place, &(indf[subsys]), status );
+  ndfNew( "_REAL", NDIMS, lbnd, ubnd, &place, &(file->file.indf), status );
 
   /* Update the cursize[] array and the nchans array */
-  cursize[subsys] = ubnd[TDIM] - lbnd[TDIM] + 1;
+  file->cursize = ubnd[TDIM] - lbnd[TDIM] + 1;
 
   /* History component */
-  ndfHcre( indf[subsys], status );
+  ndfHcre( file->file.indf, status );
   ndfHput("NORMAL","ACSIS-DA (V" PACKAGE_VERSION ")", 1, 1, history,
-	  0, 0, 0, indf[subsys], status );
-  ndfHsmod( "DISABLED", indf[subsys], status );
+	  0, 0, 0, file->file.indf, status );
+  ndfHsmod( "DISABLED", file->file.indf, status );
 
   /* Map the data array */
-  ndfMap(indf[subsys], "DATA", "_REAL", "WRITE", datapntrs, &itemp, status );
+  ndfMap(file->file.indf, "DATA", "_REAL", "WRITE", datapntrs, &itemp, status );
 
   /* Store the pointer */
-  spectra[subsys] = datapntrs[0];
+  file->tdata.spectra = datapntrs[0];
+  file->curpos = 0;
+  file->curseq = 0;
 
   /* Create the ACSIS extension that contains the receptor names and
      positions */
-  createACSISExtensions( subsys, ngrow, nrecep, recepnames, rlen, status );
+  createACSISExtensions( obsinfo, file, ngrow, status );
 
   /* Also need to create the header arrays and map those ! */
-  createExtensions( subsys, ngrow, status );
+  createExtensions( file, ngrow, status );
 
   return;
 }
@@ -1232,7 +1237,7 @@ openNDF( unsigned int subsys, unsigned int nrecep, unsigned int nchans,
 */
 
 static void
-createExtensions( unsigned int subsys, unsigned int size, int * status ) {
+createExtensions( subSystem * subsys, unsigned int size, int * status ) {
 
   int j;
   hdsdim dim[1];
@@ -1240,7 +1245,7 @@ createExtensions( unsigned int subsys, unsigned int size, int * status ) {
 
   if (*status != SAI__OK) return;
 
-  if (extmapped[subsys]) {
+  if (subsys->file.extmapped) {
     *status = SAI__ERROR;
     emsRep(" ", "createExtensions: Attempting to create extensions that are already mapped", status );
     return;
@@ -1250,23 +1255,23 @@ createExtensions( unsigned int subsys, unsigned int size, int * status ) {
   dim[0] = size;
 
   /* Create the extension */
-  ndfXnew( indf[subsys], STATEEXT, STATEEXTTYPE, 0, NULL, &(extloc[subsys]), status ); 
+  ndfXnew( subsys->file.indf, STATEEXT, STATEEXTTYPE, 0, NULL, &(subsys->file.extloc), status ); 
 
   /* Loop and create. Can initialise HDS locator array safely */
   for (j=0; j < NEXTENSIONS; j++ ) {
-    extlocators[subsys][j] = NULL;
-    datNew( extloc[subsys], hdsRecordNames[j][1], hdsRecordNames[j][0],
+    (subsys->file.extlocators)[j] = NULL;
+    datNew( subsys->file.extloc, hdsRecordNames[j][1], hdsRecordNames[j][0],
 	    ndim, dim, status );
 
-    datFind( extloc[subsys], hdsRecordNames[j][1], &(extlocators[subsys][j]), status );
+    datFind( subsys->file.extloc, hdsRecordNames[j][1], &((subsys->file.extlocators)[j]), status );
 
-    datMap( extlocators[subsys][j], hdsRecordNames[j][0], "WRITE",
-	    ndim, dim, &(extdata[subsys][j]), status );
+    datMap( (subsys->file.extlocators)[j], hdsRecordNames[j][0], "WRITE",
+	    ndim, dim, &((subsys->tdata.jcmtstate)[j]), status );
     if ( *status != SAI__OK ) break;
 
   }
 
-  if (*status == SAI__OK) extmapped[subsys] = 1;
+  if (*status == SAI__OK) subsys->file.extmapped = 1;
 
   if (*status != SAI__OK)
     emsRep(" ", "Error creating JCMT state extension", status );
@@ -1280,7 +1285,7 @@ createExtensions( unsigned int subsys, unsigned int size, int * status ) {
 */
 
 static void
-resizeExtensions( unsigned int subsys, unsigned int newsize, 
+resizeExtensions( subSystem * subsys, unsigned int newsize, 
 		  int remap, int * status ) {
 
   int j;
@@ -1295,14 +1300,14 @@ resizeExtensions( unsigned int subsys, unsigned int newsize,
 
   for (j=0; j < NEXTENSIONS; j++ ) {
 
-    datUnmap( extlocators[subsys][j], status );
+    datUnmap( subsys->file.extlocators[j], status );
     if ( *status != SAI__OK ) break;
   }
 
   for (j=0; j < NEXTENSIONS; j++ ) {
 
     /* resize */
-    datAlter( extlocators[subsys][j], 1, dim, status);
+    datAlter( (subsys->file.extlocators)[j], 1, dim, status);
     if ( *status != SAI__OK ) break;
   }
 
@@ -1310,8 +1315,8 @@ resizeExtensions( unsigned int subsys, unsigned int newsize,
     for (j=0; j < NEXTENSIONS; j++ ) {
       
       /* remap - assume this should be done after resizing all */
-      datMap( extlocators[subsys][j], hdsRecordNames[j][0], "WRITE",
-	      ndim, dim, &(extdata[subsys][j]), status );
+      datMap( (subsys->file.extlocators)[j], hdsRecordNames[j][0], "WRITE",
+	      ndim, dim, &((subsys->tdata.jcmtstate)[j]), status );
       if ( *status != SAI__OK ) break;
 
     }
@@ -1324,30 +1329,30 @@ resizeExtensions( unsigned int subsys, unsigned int newsize,
 
 /* Close down the extensions and free resources */
 
-static void closeExtensions( unsigned int subsys, int * status ) {
+static void closeExtensions( subSystem * subsys, int * status ) {
 
   int j;
 
   if ( *status != SAI__OK ) return;
 
-  if (curpos[subsys] > 0) {
-    resizeExtensions( subsys, curpos[subsys], 0, status );
+  if (subsys->curpos > 0) {
+    resizeExtensions( subsys, subsys->curpos, 0, status );
   }
 
   /* Free locators */
   for (j=0; j < NEXTENSIONS; j++) {
-    datAnnul( &(extlocators[subsys][j]), status );
+    datAnnul( &((subsys->file.extlocators)[j]), status );
   }
 
   /* Close extension */
-  datAnnul( &(extloc[subsys]), status );
+  datAnnul( &(subsys->file.extloc), status );
 
   /* indicate that we are closed down */
-  extmapped[subsys] = 0;
+  subsys->file.extmapped = 0;
 
   /* delete the extension if we never wrote to it */
-  if (curpos[subsys] == 0) {
-    ndfXdel(indf[subsys], STATEEXT,status);
+  if (subsys->curpos == 0) {
+    ndfXdel(subsys->file.indf, STATEEXT,status);
   }
 
   if (*status != SAI__OK)
@@ -1420,8 +1425,8 @@ static void writeRecord( void * basepntr[], unsigned int frame,
 
 
 static void
-createACSISExtensions( unsigned int subsys, unsigned int size, unsigned int nrecep, 
-		       const char recepnames[], size_t rlen, int * status ) {
+createACSISExtensions( const obsData * obsinfo, subSystem * subsys, unsigned int size,
+		       int * status ) {
   unsigned int i;
   char type[DAT__SZTYP+1];   /* constructed type string */
   HDSLoc * temploc = NULL;
@@ -1430,14 +1435,14 @@ createACSISExtensions( unsigned int subsys, unsigned int size, unsigned int nrec
 
   if (*status != SAI__OK) return;
 
-  if (acsismapped[subsys]) {
+  if (subsys->file.acsismapped) {
     *status = SAI__ERROR;
     emsRep( " ", "createACSISExtensions: ACSIS extension already mapped. Can not create", status);
     return;
   }
 
   /* create ACSIS extension */
-  ndfXnew( indf[subsys], ACSISEXT, ACSISEXTTYP, 0, NULL, &(acsisloc[subsys]), status );
+  ndfXnew( subsys->file.indf, ACSISEXT, ACSISEXTTYP, 0, NULL, &(subsys->file.acsisloc), status );
 
   /* Need to create the following components:
      - RECEPTORS  _CHAR* array for each of the nrecep elements and their names. This fixed
@@ -1447,36 +1452,36 @@ createACSISExtensions( unsigned int subsys, unsigned int size, unsigned int nrec
   */
 
   /* Create the receptor component and store the names */
-  if (recepnames) {
-    datCctyp( rlen, type );
-    dim[0] = nrecep;
-    datNew( acsisloc[subsys], "RECEPTORS", type, 1, dim, status );
-    datFind( acsisloc[subsys], "RECEPTORS", &temploc, status );
-    datPut( temploc, type, 1, dim, recepnames, status);
+  if (obsinfo->recep_name_buff != NULL) {
+    datCctyp( obsinfo->receplen, type );
+    dim[0] = obsinfo->nrecep;
+    datNew( (subsys->file.acsisloc), "RECEPTORS", type, 1, dim, status );
+    datFind( (subsys->file.acsisloc), "RECEPTORS", &temploc, status );
+    datPut( temploc, type, 1, dim, obsinfo->recep_name_buff, status);
     datAnnul( &temploc, status );
   }
 
   /* Now create the positions array and map it */
   dim[0] = 2;
-  dim[1] = nrecep;
+  dim[1] = obsinfo->nrecep;
   dim[2] = size;
-  datNew( acsisloc[subsys], "RECEPPOS", "_DOUBLE", 3, dim, status );
-  datFind( acsisloc[subsys], "RECEPPOS", &(receppos_loc[subsys]), status );
-  datMapD( receppos_loc[subsys], "WRITE", 3, dim, &(receppos_data[subsys]), status );
+  datNew( subsys->file.acsisloc, "RECEPPOS", "_DOUBLE", 3, dim, status );
+  datFind( subsys->file.acsisloc, "RECEPPOS", &(subsys->file.receppos_loc), status );
+  datMapD( subsys->file.receppos_loc, "WRITE", 3, dim, &(subsys->tdata.receppos), status );
 
   if (*status != SAI__OK) {
-    acsismapped[subsys] = 0;
-    receppos_data[subsys] = NULL;
+    subsys->file.acsismapped = 0;
+    subsys->tdata.receppos = NULL;
   } else {
 
     /* Copy in bad values - unroll since we know there is always a 2 */
     nelem = dim[0] * dim[1] * dim[2];
     for (i=0; i < nelem; i+=2) {
-      (receppos_data[subsys])[i] = VAL__BADD;
-      (receppos_data[subsys])[i+1] = VAL__BADD;
+      (subsys->tdata.receppos)[i] = VAL__BADD;
+      (subsys->tdata.receppos)[i+1] = VAL__BADD;
     }
 
-    acsismapped[subsys] = 1;
+    subsys->file.acsismapped = 1;
   }
   
   if (*status != SAI__OK)
@@ -1492,7 +1497,7 @@ createACSISExtensions( unsigned int subsys, unsigned int size, unsigned int nrec
 */
 
 static void
-resizeACSISExtensions( unsigned int subsys, unsigned int newsize, 
+resizeACSISExtensions( subSystem * subsys, unsigned int newsize, 
 		       int remap, int * status ) {
 
   hdsdim dim[3];
@@ -1505,11 +1510,11 @@ resizeACSISExtensions( unsigned int subsys, unsigned int newsize,
 
   if (*status != SAI__OK) return;
 
-  if (acsismapped[subsys])
-    datUnmap( receppos_loc[subsys], status );
+  if (subsys->file.acsismapped)
+    datUnmap( subsys->file.receppos_loc, status );
 
   /* Get the current bounds */
-  datShape( receppos_loc[subsys], ndim, dim, &actdim, status );
+  datShape( subsys->file.receppos_loc, ndim, dim, &actdim, status );
 
   if (*status != SAI__OK && ndim != (size_t)actdim) {
     *status = SAI__ERROR;
@@ -1521,12 +1526,12 @@ resizeACSISExtensions( unsigned int subsys, unsigned int newsize,
   /* resize */
   oldsize = dim[ndim-1];
   dim[ndim-1] = newsize;
-  datAlter( receppos_loc[subsys], ndim, dim, status);
+  datAlter( subsys->file.receppos_loc, ndim, dim, status);
 
   if (remap) {
     /* remap - assume this should be done after resizing all */
-    datMapD( receppos_loc[subsys], "WRITE",
-	     ndim, dim, &(receppos_data[subsys]), status );
+    datMapD( subsys->file.receppos_loc, "WRITE",
+	     ndim, dim, &(subsys->tdata.receppos), status );
 
     if (*status == SAI__OK) {
       /* fill with bad values since may not get all receptors */
@@ -1534,7 +1539,7 @@ resizeACSISExtensions( unsigned int subsys, unsigned int newsize,
       start = calcOffset( dim[0], dim[1], 0, oldsize, status );
       if (*status == SAI__OK) {
 	for (j=0; j < ndoubles; j++) {
-	  (receppos_data[subsys])[start+j] = VAL__BADD;
+	  (subsys->tdata.receppos)[start+j] = VAL__BADD;
 	}
       }
     }
@@ -1548,27 +1553,27 @@ resizeACSISExtensions( unsigned int subsys, unsigned int newsize,
 
 /* Close down the ACSIS extension and free resources */
 
-static void closeACSISExtensions( unsigned int subsys, int * status ) {
+static void closeACSISExtensions( subSystem * subsys, int * status ) {
 
   if ( *status != SAI__OK ) return;
 
-  if (curpos[subsys] > 0) {
-    resizeACSISExtensions( subsys, curpos[subsys], 0, status );
+  if (subsys->curpos > 0) {
+    resizeACSISExtensions( subsys, subsys->curpos, 0, status );
   }
 
   /* Free locators */
-  datAnnul( &(receppos_loc[subsys]), status );
-  receppos_data[subsys] = NULL;
+  datAnnul( &(subsys->file.receppos_loc), status );
+  subsys->tdata.receppos = NULL;
 
   /* delete the receptor positions if never written */
-  if (curpos[subsys] == 0) {
-    datErase(acsisloc[subsys], "RECEPPOS", status );
+  if (subsys->curpos == 0) {
+    datErase(subsys->file.acsisloc, "RECEPPOS", status );
   }
 
   /* Close extension */
-  datAnnul( &(acsisloc[subsys]), status );
+  datAnnul( &(subsys->file.acsisloc), status );
 
-  acsismapped[subsys] = 0;
+  subsys->file.acsismapped = 0;
 
   if (*status != SAI__OK)
     emsRep(" ", "Error closing ACSIS extension", status );
@@ -1576,14 +1581,14 @@ static void closeACSISExtensions( unsigned int subsys, int * status ) {
 }
 
 /* Write coordinate positions to ACSIS extension */
-static void writeRecepPos( double * posdata, unsigned int frame, 
+static void writeRecepPos( const obsData * obsinfo, double * posdata, unsigned int frame, 
 			   const ACSISRtsState * record, int * status ) {
   unsigned int offset;
 
   if (*status != SAI__OK) return;
 
   /* Calculate offset into data array */
-  offset = calcOffset( 2, nreceps_per_obs, record->acs_feed, frame, status );
+  offset = calcOffset( 2, obsinfo->nrecep, record->acs_feed, frame, status );
 
   if (posdata != NULL) {
     posdata[offset] = record->acs_feedx;
@@ -1599,25 +1604,37 @@ static void writeRecepPos( double * posdata, unsigned int frame,
 /* Close NDF for a particular subsystem */
 
 static void
-closeNDF( unsigned int subsys, int * status ) {
+closeNDF( subSystem * subsys, int * status ) {
 
   int itemp;                /* Temp integer */
   int lbnd[NDIMS];          /* Lower bounds of NDF */
   int ubnd[NDIMS];          /* upper bounds of NDF */
+  fileInfo * file;          /* File information */
 
   /* Always check status on entry */
   if (*status != SAI__OK) return;
 
+  /* Get the file information */
+  file = &(subsys->file);
+
+  /* check that we have a file */
+  if (file->indf == NDF__NOID) {
+    *status = SAI__ERROR;
+    emsRep("closeNDF", "attempt to close an NDF that is not actually open",
+	   status);
+    return;
+  }
+
   /* Unmap */
 #if SPW_DEBUG
-  printf("Unmap current NDF final time\n");
+  printf("Unmap current NDF to close the file\n");
 #endif
-  TIMEME("Final unmap", ndfUnmap( indf[subsys], "DATA", status ););
+  TIMEME("Final unmap", ndfUnmap( file->indf, "DATA", status ););
 
   /* Shrink file to actual size */
-  ndfBound(indf[subsys], NDIMS, lbnd, ubnd, &itemp, status );
-  if (curpos[subsys] > 0) {
-    ubnd[TDIM] = lbnd[TDIM] + curpos[subsys] - 1;
+  ndfBound(file->indf, NDIMS, lbnd, ubnd, &itemp, status );
+  if (subsys->curpos > 0) {
+    ubnd[TDIM] = lbnd[TDIM] + subsys->curpos - 1;
   } else {
     ubnd[TDIM] = lbnd[TDIM];
   }
@@ -1625,27 +1642,27 @@ closeNDF( unsigned int subsys, int * status ) {
 #if SPW_DEBUG
   printf("Setting final bounds. Resize to %lld spectra\n", (unsigned long long)ubnd[TDIM]);
 #endif
-  TIMEME( "Final set bounds", ndfSbnd(NDIMS, lbnd, ubnd, indf[subsys], status ););
+  TIMEME( "Final set bounds", ndfSbnd(NDIMS, lbnd, ubnd, file->indf, status ););
 
   /* Close extensions */
   TIMEME( "Final extension resize", closeExtensions( subsys, status ););
   closeACSISExtensions( subsys, status );
 
   /* Close file */
-  ndfAnnul( &(indf[subsys]), status );
+  ndfAnnul( &(file->indf), status );
 
 #if SPW_DEBUG
-  printf("Wrote %d sequence steps to subsystem %d (max was %d)\n", curpos[subsys], subsys,
-	 cursize[subsys]);
+  printf("Wrote %d sequence steps to subsystem %d (max was %d)\n", subsys->curpos, subsys->index,
+	 subsys->cursize);
 #endif
 
   /* Force globals to be reset */
-  spectra[subsys] = NULL;
-  cursize[subsys] = 0;
-  indf[subsys] = NDF__NOID;
+  subsys->tdata.spectra = NULL;
+  subsys->cursize = 0;
+  file->indf = NDF__NOID;
 
   if (*status != SAI__OK) {
-    emsSetu("S", subsys);
+    emsSetu("S", subsys->index);
     emsRep( " ", "Error closing Spectrum NDF file subsystem ^S", status );
   }
 
@@ -1655,7 +1672,7 @@ closeNDF( unsigned int subsys, int * status ) {
 /* Resize a specific NDF */
 
 static void
-resizeNDF( unsigned int subsys, unsigned int newsize, int * status ) {
+resizeNDF( const obsData * obsinfo, subSystem * subsys, unsigned int newsize, int * status ) {
 
   int ubnd[NDIMS];
   int lbnd[NDIMS];
@@ -1674,10 +1691,10 @@ resizeNDF( unsigned int subsys, unsigned int newsize, int * status ) {
 #if SPW_DEBUG
   printf("Unmap data array in preparation for resize\n");
 #endif
-  TIMEME( "ndfUnmap", ndfUnmap(indf[subsys], "DATA", status ););
+  TIMEME( "ndfUnmap", ndfUnmap(subsys->file.indf, "DATA", status ););
 
   /* Get the existing bounds */
-  ndfBound(indf[subsys], NDIMS, lbnd, ubnd, &itemp, status );
+  ndfBound(subsys->file.indf, NDIMS, lbnd, ubnd, &itemp, status );
 
   if (*status == SAI__OK && itemp != NDIMS) {
     *status = SAI__ERROR;
@@ -1688,19 +1705,19 @@ resizeNDF( unsigned int subsys, unsigned int newsize, int * status ) {
   }
     
   nchans = ubnd[CHANDIM] - lbnd[CHANDIM] + 1;
-  if (*status == SAI__OK && nchans != nchans_per_subsys[subsys]) {
+  if (*status == SAI__OK && nchans != subsys->nchans) {
     *status = SAI__ERROR;
     emsSetu("UB", nchans);
-    emsSetu("NC", nchans_per_subsys[subsys] );
+    emsSetu("NC", subsys->nchans );
     emsRep(" ", "acsSpecWriteTS: Bizzare internal error. Nchans is ^UB not ^NC",
 	   status);
   }
 
   nreceps = ubnd[RECDIM] - lbnd[RECDIM] + 1;
-  if (*status == SAI__OK && nreceps != nreceps_per_obs) {
+  if (*status == SAI__OK && nreceps != obsinfo->nrecep) {
     *status = SAI__ERROR;
     emsSetu("UB", nreceps);
-    emsSetu("NR", nreceps_per_obs);
+    emsSetu("NR", obsinfo->nrecep);
     emsRep(" ", "acsSpecWriteTS: Bizzare internal error. Nreceptors is ^UB not ^NR",
 	   status);
   }
@@ -1714,14 +1731,14 @@ resizeNDF( unsigned int subsys, unsigned int newsize, int * status ) {
   printf("Setting new bounds. Grow to %lld sequence steps (from %lld)\n", (unsigned long long)newt,
 	 (unsigned long long)(newt-newsize));
 #endif
-  TIMEME("Set NDF bounds", ndfSbnd( NDIMS, lbnd, ubnd, indf[subsys], status ););
+  TIMEME("Set NDF bounds", ndfSbnd( NDIMS, lbnd, ubnd, subsys->file.indf, status ););
 
   /* map data array again */
 #if SPW_DEBUG
   printf("Remap the data array\n");
 #endif
-  TIMEME("Remp NDF", ndfMap( indf[subsys], "DATA", "_REAL", "WRITE", datapntrs, &itemp, status ););
-  spectra[subsys] = datapntrs[0];
+  TIMEME("Remp NDF", ndfMap( subsys->file.indf, "DATA", "_REAL", "WRITE", datapntrs, &itemp, status ););
+  subsys->tdata.spectra = datapntrs[0];
 
   /* Initialise the new memory to bad */
   ncells = ( ubnd[RECDIM] - lbnd[RECDIM] + 1 ) *
@@ -1731,9 +1748,9 @@ resizeNDF( unsigned int subsys, unsigned int newsize, int * status ) {
 		       (ubnd[RECDIM]-lbnd[RECDIM]+1),
 		       0, (newt-newsize), status); 
   if (*status == SAI__OK) {
-    pos = &((spectra[subsys])[offset]);
+    pos = &((subsys->tdata.spectra)[offset]);
     for (i = 0; i < newsize; i++) {
-      memcpy( pos, bad_cache[subsys], nbytes);
+      memcpy( pos, subsys->tdata.bad, nbytes);
       pos += ncells;
     }
   }
@@ -1743,7 +1760,7 @@ resizeNDF( unsigned int subsys, unsigned int newsize, int * status ) {
   TIMEME("Resize coords", resizeACSISExtensions( subsys, newt, 1, status  ););
   
   /* Update cursize */
-  cursize[subsys] = newt;
+  subsys->cursize = newt;
 
 }
 
@@ -1764,12 +1781,10 @@ calcOffset( unsigned int nchans, unsigned int maxreceps, unsigned int nrecep, un
 /* Allocate resources for spectrum */
 
 static void
-allocResources( unsigned int subsys, unsigned int nrecep, unsigned int nchans,
-		unsigned int nseq, const char recepnames[], size_t receplen, int * status ) {
+allocResources( const obsData * obsinfo, subSystem * subsys, unsigned int nseq, int *status ) {
 
-#if USE_MEMORY_CACHE
+
   unsigned int seq;
-#endif
   unsigned int ncells;
   size_t nbytes;
   float * pos;
@@ -1779,39 +1794,33 @@ allocResources( unsigned int subsys, unsigned int nrecep, unsigned int nchans,
   if (*status != SAI__OK) return;
 
 #if USE_MEMORY_CACHE
-  
-  seq = ( nseq == 0 ? max_seq[subsys] : nseq );
+  seq = ( nseq == 0 ? subsys->maxsize : nseq );
 
-  if (cursize[subsys] != seq) {
-    nbytes = seq * nrecep * nchans * SIZEOF_FLOAT;
-    myRealloc( (void**)&(memspec[subsys]), nbytes, status );
+  if (subsys->cursize != seq) {
+    nbytes = seq * obsinfo->nrecep * subsys->nchans * SIZEOF_FLOAT;
+    myRealloc( (void**)&(subsys->tdata.spectra), nbytes, status );
 
     allocHeaders(subsys, seq, status );
-    allocPosData(subsys, nrecep, seq, status );
+    allocPosData(obsinfo, subsys, seq, status );
   }
 
-  /* Record the new size */
-  cursize[subsys] = seq;
-
 #else
-  /* Opening a new NDF will automatically initialise it to zero
-     so we need to make sure it is BAD later on */
-  openNDF( subsys, nrecep, nchans, nseq, recepnames, receplen, status );
+  openNDF( obsinfo, subsys, subsys, nseq, status );
 #endif
+
+  /* Record the new size */
+  subsys->cursize = seq;
 
   /* initialise all the spectra to bad in case we miss a receptor 
      in the sequence */
-#if USE_MEMORY_CACHE
-  pos = memspec[subsys];
-#else
-  pos = spectra[subsys];
-#endif
 
-  ncells = nrecep * nchans;
+  pos = subsys->tdata.spectra;
+
+  ncells = obsinfo->nrecep * subsys->nchans;
   nbytes = ncells * SIZEOF_FLOAT;
   if (*status == SAI__OK) {
-    for (i = 0; i < cursize[subsys] ; i++) {
-      memcpy( pos, bad_cache[subsys], nbytes );
+    for (i = 0; i < subsys->cursize ; i++) {
+      memcpy( pos, subsys->tdata.bad, nbytes );
       pos += ncells;
     }
   }
@@ -1819,7 +1828,7 @@ allocResources( unsigned int subsys, unsigned int nrecep, unsigned int nchans,
 }
 
 static void
-resizeResources( unsigned int subsys, unsigned int newsize, int * status ) {
+resizeResources( const obsData *obsinfo, subSystem * subsys, unsigned int newsize, int * status ) {
   if (*status != SAI__OK) return;
 
 #if USE_MEMORY_CACHE
@@ -1828,95 +1837,108 @@ resizeResources( unsigned int subsys, unsigned int newsize, int * status ) {
   emsRep(" ", "Should never be requested to realloc global buffer. Internal programming error",
 	 status );
 #else
-  resizeNDF( subsys, newsize, status );
+  resizeNDF( obsinfo, subsys, newsize, status );
 #endif
 
 }
 
 static void
-flushResources( unsigned int subsys, int * status ) {
+flushResources( const obsData * obsinfo, subSystem * subsys, int * status ) {
 
 #if USE_MEMORY_CACHE
-  openNDF( subsys, nreceps_per_obs, nchans_per_subsys[subsys], 
-	   curpos[subsys], recep_name_buff, receplen, status);
-  copyCache( subsys, nreceps_per_obs, nchans_per_subsys[subsys],
-	     curpos[subsys], status );
+  subSystem output;  /* Some where to store file information */
+
+  /* initialise the output */
+  memset( &output, 0, sizeof(subSystem));
+
+  /* copy subscan number */
+  output.file.subscan = subsys->file.subscan;
+
+  /* open the file and copy in data */
+  openNDF( obsinfo, subsys, &output, subsys->curpos, status );
+  copyCache( obsinfo, subsys, &output, subsys->curpos, status );
+
+  /* copy the subscan number back into the input subsystem */
+  subsys->file.subscan = output.file.subscan;
+
+  /* make sure we close the correct subsystem */
+  subsys = &output;
 
 #endif
 
   closeNDF( subsys, status );
 
   /* New position in buffer is the beginning */
-  curpos[subsys] = 0;
+  subsys->curpos = 0;
 
 }
 
-static void freeResources ( unsigned int subsys, int * status) {
-#if USE_MEMORY_CACHE
+static void freeResources ( obsData * obsinfo, subSystem * subsys, int * status) {
+
   unsigned int i;
-#endif
 
   /* Do not use status since we want to free the memory */
 
-#if USE_MEMORY_CACHE
-  if ( memspec[subsys] != NULL) {
-    starFree( memspec[subsys]);
-    memspec[subsys] = NULL;
-  }
-  for (i=0; i<NEXTENSIONS; i++) {
-    if (memextdata[subsys][i] != NULL) {
-      starFree( memextdata[subsys][i] );
-      memextdata[subsys][i] = NULL;
+  if ( subsys->file.indf == NDF__NOID) {
+
+    if ( subsys->tdata.spectra != NULL) {
+      starFree( subsys->tdata.spectra);
+      subsys->tdata.spectra = NULL;
     }
-  }
-  if (memrecpos[subsys] != NULL) {
-    starFree( memrecpos[subsys] );
-    memrecpos[subsys] = NULL;
-  }
-#endif
+    for (i=0; i<NEXTENSIONS; i++) {
+      if ((subsys->tdata.jcmtstate)[i] != NULL) {
+	starFree( (subsys->tdata.jcmtstate)[i] );
+	(subsys->tdata.jcmtstate)[i] = NULL;
+      }
+    }
+    if (subsys->tdata.receppos != NULL) {
+      starFree( subsys->tdata.receppos );
+      subsys->tdata.receppos = NULL;
+    }
 
-  if (bad_cache[subsys] != NULL) {
-    starFree( bad_cache[subsys] );
-    bad_cache[subsys] = NULL;
   }
 
-  if (recep_name_buff != NULL) {
-    starFree( recep_name_buff );
-    recep_name_buff = NULL;
-    receplen = 0;
+  if (subsys->tdata.bad != NULL) {
+    starFree( subsys->tdata.bad );
+    subsys->tdata.bad = NULL;
+  }
+
+  if (obsinfo->recep_name_buff != NULL) {
+    starFree( obsinfo->recep_name_buff );
+    obsinfo->recep_name_buff = NULL;
+    obsinfo->receplen = 0;
   }
 
 }
 
 /* 
    Create space for the header information of specified size.
-   Pointers stored in memextdata.
 */
 
 static void
-allocHeaders( unsigned int subsys, unsigned int size, int * status ) {
+allocHeaders( subSystem * subsys, unsigned int size, int * status ) {
 
   int j;
-  size_t sizeofx;
+  specData * tdata;
 
   if (*status != SAI__OK) return;
 
+  /* Get local pointer */
+  tdata = &(subsys->tdata);
+
   /* Make sure all are initialised */
   for (j=0; j < NEXTENSIONS; j++) {
-    memextdata[subsys][j] = NULL;
+    (tdata->jcmtstate)[j] = NULL;
   }
 
   /* Loop and create  */
   for (j=0; j < NEXTENSIONS; j++ ) {
 
-    /* work out the number of bytes per element */
-    sizeofx = sizeofHDSType( hdsRecordNames[j][0], status );
-
     if (*status != SAI__OK) break;
     
     /* get some memory */
     /* Do not need to initialise since we always populate it */
-    myRealloc( &(memextdata[subsys][j]), size * hdsRecordSizes[j], status );
+    myRealloc( &((tdata->jcmtstate)[j]), size * hdsRecordSizes[j], status );
 
   }
 
@@ -1926,20 +1948,20 @@ allocHeaders( unsigned int subsys, unsigned int size, int * status ) {
 
 /* Allocate memory for the positional data */
 
-static void allocPosData( unsigned int subsys, unsigned int nrecep, unsigned int nseq, int * status ) {
+static void allocPosData( const obsData * obsinfo, subSystem * subsys, unsigned int nseq, int * status ) {
   size_t nbytes;
   unsigned int ndoubles;
   unsigned int i;
 
   if (*status != SAI__OK) return;
 
-  ndoubles = 2 * nrecep * nseq;
+  ndoubles = 2 * obsinfo->nrecep * nseq;
   nbytes = ndoubles * SIZEOF_DOUBLE;
-  myRealloc( (void**)&(memrecpos[subsys]), nbytes, status );
+  myRealloc( (void**)&(subsys->tdata.receppos), nbytes, status );
 
   /* Initialise since we can not guarantee that each receptor will get a coordinate */
   for (i=0; i<ndoubles; i++) {
-    (memrecpos[subsys])[i] = VAL__BADD;
+    (subsys->tdata.receppos)[i] = VAL__BADD;
   }
 
 }
@@ -2001,23 +2023,42 @@ static size_t sizeofHDSType( const char * type, int * status ) {
 
 /* Copy from malloced buffers to mapped buffers */
 
-static void copyCache( unsigned int subsys, unsigned int nreceps, unsigned int nchan, 
+ static void copyCache( const obsData * obsinfo, const subSystem * input, subSystem * output, 
 		       unsigned int nseq, int * status) {
   unsigned int i;
 
-
   if (*status != SAI__OK) return;
 
+  /* check compatibility */
+  if (input->nchans != output->nchans) {
+    *status = SAI__ERROR;
+    emsSetu( "IN", input->nchans);
+    emsSetu( "OUT", output->nchans);
+    emsRep( "copyCache", "Number of channels in input subsystem (^IN) differs from"
+	    " number in output subsystem (^OUT)", status);
+    return;
+  }
+
+  if (output->maxsize < nseq) {
+    *status = SAI__ERROR;
+    emsSetu( "NSEQ", nseq);
+    emsSetu( "MAX", output->maxsize);
+    emsRep("copyCache2", "Number of sequence steps to copy (^NSEQ) exceeds available"
+	   " space in output (^MAX)", status);
+    return;
+  }
+
   /* Copy the main data array */
-  memcpy( spectra[subsys], memspec[subsys], nreceps * nchan * nseq * SIZEOF_FLOAT );
+  memcpy( output->tdata.spectra, input->tdata.spectra, obsinfo->nrecep * input->nchans * nseq * SIZEOF_FLOAT );
+  output->curpos = nseq;
 
   /* sequence data */
   for (i=0; i<NEXTENSIONS; i++) {
-    memcpy( extdata[subsys][i], memextdata[subsys][i], nseq * hdsRecordSizes[i] );
+    memcpy( (output->tdata.jcmtstate)[i], (input->tdata.jcmtstate)[i], nseq * hdsRecordSizes[i] );
   }
 
   /* receptor positions */
-  memcpy( receppos_data[subsys], memrecpos[subsys], nreceps * 2 * nseq * SIZEOF_DOUBLE );
+  memcpy( output->tdata.receppos, input->tdata.receppos, obsinfo->nrecep * 2 * nseq * SIZEOF_DOUBLE );
 
 }
 
