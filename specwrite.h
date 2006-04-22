@@ -69,15 +69,15 @@ typedef struct ACSISRtsState {
   unsigned int rts_endnum;  /* Highest number expected in this sequence */
   double rts_end;    /* MJD TAI of end of sequence step */
   char   rts_tasks[SIZEOF_RTS_TASKS + 1];
-  char   rts_errs[SIZEOF_RTS_ERRS + 1];
+  double smu_x;
+  double smu_y;
+  double smu_z;
+  char   smu_chop_phase;
   int    smu_jig_index;
   double smu_az_jig_x;
   double smu_az_jig_y;
   double smu_az_chop_x;
   double smu_az_chop_y;
-  double smu_x;
-  double smu_y;
-  double smu_z;
   double smu_tr_jig_x;
   double smu_tr_jig_y;
   double smu_tr_chop_x;
@@ -90,9 +90,10 @@ typedef struct ACSISRtsState {
   double tcs_az_dc2;
   double tcs_az_bc1;
   double tcs_az_bc2;
-  int tcs_index;
-  char tcs_source[SIZEOF_TCS_SOURCE+1];
-  char tcs_tr_sys[SIZEOF_TCS_TR_SYS+1];
+  char   tcs_beam;
+  int    tcs_index;
+  char   tcs_source[SIZEOF_TCS_SOURCE+1];
+  char   tcs_tr_sys[SIZEOF_TCS_TR_SYS+1];
   double tcs_tr_ang;
   double tcs_tr_ac1;
   double tcs_tr_ac2;
@@ -100,19 +101,19 @@ typedef struct ACSISRtsState {
   double tcs_tr_dc2;
   double tcs_tr_bc1;
   double tcs_tr_bc2;
-  float enviro_rel_hum;
-  float enviro_pressure;
-  float enviro_air_temp;
+  float  enviro_rel_hum;
+  float  enviro_pressure;
+  float  enviro_air_temp;
+  int    acs_spec_window_id;
   unsigned int acs_feed;  /* Feed number */
-  float acs_tsys;
-  float acs_trx;
-  char  acs_source_ro[SIZEOF_ACS_SOURCE_RO+1];
-  int   acs_spec_window_id;
-  int   acs_drcontrol;
-  int   acs_no_prev_refs;
-  int   acs_no_next_refs;
-  int   acs_no_ons;
-  float acs_exposure;
+  float  acs_tsys;
+  float  acs_trx;
+  char   acs_source_ro[SIZEOF_ACS_SOURCE_RO+1];
+  int    acs_no_prev_refs;
+  int    acs_no_next_refs;
+  int    acs_no_ons;
+  int    acs_drcontrol;
+  float  acs_exposure;
   double acs_feedx;  /* Y coordinate of feed "acs_feed" */
   double acs_feedy;  /* Y coordinate of feed "acs_feed" */
 } ACSISRtsState;
