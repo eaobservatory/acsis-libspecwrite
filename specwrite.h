@@ -26,6 +26,8 @@
 *  History:
 *     27-FEB-2006 (TIMJ):
 *        Original version.
+*     21-APR-2006 (TIMJ):
+*        nchans now used in specWrite not specOpen.
 
 *  Copyright:
 *     Copyright (C) 2006 Particle Physics and Astronomy Research Council.
@@ -124,13 +126,12 @@ void acsSpecOpenTS( const char * dir,
 		    unsigned int obsnum,
 		    unsigned int nrecep,
 		    unsigned int nsubsys,
-		    const size_t nchans[],
-		    unsigned int nseq,
 		    const char* recepnames[],
 		    int * status );
 
 /* Write a spectrum to the file */
 void acsSpecWriteTS( unsigned int subsys,
+		     unsigned int nchans,
 		     const float spectrum[],
 		     const ACSISRtsState * state,
 		     const AstFitsChan * freq,

@@ -318,22 +318,21 @@ static size_t hdsRecordSizes[NEXTENSIONS];
 *     acsSpecOpenTS
 
 *  Purpose:
-*     Open NDF file for writing time series spectra
+*     Prepare the file writing system for a new observation
 
 *  Invocation:
 *     acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, 
 *                    unsigned int obsnum, unsigned int nrecep,
-*                    unsigned int nsubsys, const size_t nchans[], 
-*                    unsigned int nseq, const char *recepnames[],
+*                    unsigned int nsubsys, const char *recepnames[],
 *                    int * status );
 
 *  Language:
 *     Starlink ANSI C
 
 *  Description:
-*     This function must be used to prepare the file for output. It must
-*     be called before calling acsSpecWriteTS. It will be pre-sized to receive
-*     spectra.
+*     This function must be used to prepare the data writing system.
+*     It must be called before calling acsSpecWriteTS. The subscan
+*     directory will be created.
 
 *  Arguments:
 *     dir = const char * (Given)
@@ -342,16 +341,11 @@ static size_t hdsRecordSizes[NEXTENSIONS];
 *        UT date in YYYYMMDD format. Used to construct the file name.
 *     obsnum = unsigned int (Given)
 *        Current observation number. Used to construct the file name.
+*        There is no check to make sure that the observation number is new.
 *     nrecep = unsigned int (Given)
 *        Number of receptors participating in this observation.
 *     nsubsys = unsigned int (Given)
-*        Number of subsystems to be written in this observation.
-*     nchans[] = size_t (Given)
-*        Number of channels in each subsystem. Should have at least "nsubsys"
-*        elements.
-*     nseq = unsigned int (Given)
-*        Initial number of sequence steps to use to presize the data file.
-*        If 0 is given, an internal default will be used.
+*        Number of subsystems present in this observation.
 *     recepnames[] = const char*[] (Given)
 *        Names of each receptor in feed order.
 *     status = int * (Given & Returned)
@@ -365,15 +359,16 @@ static size_t hdsRecordSizes[NEXTENSIONS];
 *        Original version.
 *     05-APR-2006 (TIMJ):
 *        Use structured globals
+*     21-APR-2006 (TIMJ):
+*        Defer resource allocation until the first spectrum arrives.
 
 *  Notes:
-*     - Currently only one spectrum file can be open for write at any
-*     given time. It is an error for this function to be called whilst
-*     a file is open. Call acsSpecClose to close the file.
-*     - The file created by this routine will be of the form
-*       aYYYYMMDD_NNNNN.sdf where NNNNN is the zero padded observation number.
-*     - The resulting file will be an HDS container containing an NDF
-*     for each subsystem. These NDFs will be dimensioned as nchans*time.
+*     - Currently only one observation can be active at any time
+*       (some global variables are used internally for state)
+*     - It is an error for this routine to be called if an observation
+*       is in progress. Please call acsSpecCloseTS() before calling
+*       acsSpecOpenTS().
+*     - The files created by this routine conform to the ICD (OCS/ICD/022)
 
 *  Copyright:
 *     Copyright (C) 2006 Particle Physics and Astronomy Research Council.
@@ -407,16 +402,13 @@ static size_t hdsRecordSizes[NEXTENSIONS];
 void
 acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 	       unsigned int nrecep, unsigned int nsubsys, 
-	       const size_t nchans[], unsigned int nseq,
 	       const char *recepnames[], int * status ) {
 
   char * cpos = NULL;          /* offset into string */
   unsigned int i;              /* Loop counter */
-  unsigned int j;              /* Loop counter */
   char * sdir = NULL;          /* subscan directory */
   size_t len;                  /* temp length */
   size_t receplen;             /* Length of longest receptor name */
-  unsigned int nperseq;        /* Number of elements per sequence */
   char * recep_name_buff = NULL; /* Malloced buffer for receptor names */
   subSystem * subsys = NULL;   /* Individual subsystem */
 
@@ -496,7 +488,8 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
   OBSINFO.receplen = receplen;
   OBSINFO.recep_name_buff = recep_name_buff;
 
-  /* Need an NDF per subsystem */
+  /* Need an NDF/cache per subsystem. Make sure everything is initialised here.
+     We allocate the resources the first time that acsSpecWriteTS is called. */
   for (i = 0; i < nsubsys; i++) {
 
     /* Select the subsystem to modify */
@@ -506,31 +499,7 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
     memset( subsys, 0, sizeof(*subsys));
 
     /* Some intialisation */
-    subsys->nchans = nchans[i];
     subsys->index = i;
-
-    /* Number of data values per sequence */
-    nperseq = nrecep * nchans[i];
-
-    /* Calculate the number of sequence steps that we are allowed to grow
-       before opening new file. */
-    subsys->maxsize = MAXBYTES / ( nperseq * SIZEOF_FLOAT );
-
-    /* Allocate a cache of bad values to simplify initialisation */
-    subsys->tdata.bad = starMalloc( nperseq * SIZEOF_FLOAT );
-    if (subsys->tdata.bad == NULL) {
-      if (*status == SAI__OK) {
-	*status = SAI__ERROR;
-	emsRep(" ","Unable to allocate memory for bad value cache", status );
-	break;
-      }
-    }
-    for (j=0; j<nperseq; j++) {
-      (subsys->tdata.bad)[j] = VAL__BADR;
-    }
-
-    /* Allocate resources for this subsystem */
-    allocResources( &OBSINFO, subsys, subsys->maxsize, status );
 
   }
 
@@ -551,7 +520,7 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 *     Write a spectrum to an HDS time-series file.
 
 *  Invocation:
-*     acsSpecWriteTS( unsigned int subsys, const float spectrum[], 
+*     acsSpecWriteTS( unsigned int subsys, unsigned int nchans, const float spectrum[], 
 *                     const ACSISRtsState * record, const AstFitsChan * freq,
 *                     int *status);
 
@@ -565,7 +534,10 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 *  Arguments:
 *     subsys = unsigned int (Given)
 *        Subsystem used for this spectrum (start counting at 0).
-*        Much match the nchans[] array given to acsSpecOpenTS.
+*     nchans = unsigned int (Given)
+*        Number of channels in the spectrum. The number of channels
+*        must be identical for all spectra supplied for the identical
+*        subsystem.
 *     spectrum = float[nchan] (Given)
 *        Spectrum itself.
 *     record = const ACSISRtsState * (Given)
@@ -588,6 +560,8 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 *        Original version.
 *     05-APR-2006 (TIMJ):
 *        Use structured globals
+*     21-APR-2006 (TIMJ):
+*        Dynamically allocate memory based on first spectrum arriving.
 
 *  Notes:
 *     - Must have previously called acsSpecOpenTS.
@@ -616,7 +590,7 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 */
 
 void
-acsSpecWriteTS( unsigned int subsysnum, const float spectrum[], 
+acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectrum[], 
 		const ACSISRtsState* record,
 		const AstFitsChan * freq, int * status ) {
 
@@ -630,6 +604,8 @@ acsSpecWriteTS( unsigned int subsysnum, const float spectrum[],
   unsigned int tindex;         /* Position in sequence array for this sequence */
   unsigned int *rtsseqs;       /* Pointer to array of sequence numbers */
   unsigned int max_behind;     /* How many sequence steps to look behind */
+  unsigned int nperseq;        /* Number of elements per sequence */
+
   int found = 0;               /* Did we find the sequence? */
   unsigned int i;              /* loop counter */
   double * posdata;
@@ -645,6 +621,14 @@ acsSpecWriteTS( unsigned int subsysnum, const float spectrum[],
     emsSetu("IN", subsysnum);
     emsSeti("MAX", maxsubsys-1);
     emsRep(" ","acsSpecWriteTS: Supplied subsystem number (^IN) exceeds max allowed (^MAX)", status);
+    return;
+  }
+  if (subsysnum >= OBSINFO.nsubsys) {
+    *status = SAI__ERROR;
+    emsSetu( "IN", subsysnum );
+    emsSetu( "MAX", OBSINFO.nsubsys -1 );
+    emsRep( " ", "acsSpecWriteTS: Supplied subsystem number (^IN) exceeds number supplied to "
+	    "acsSpecOpenTS (^MAX)", status);
     return;
   }
 
@@ -667,6 +651,53 @@ acsSpecWriteTS( unsigned int subsysnum, const float spectrum[],
 
   /* Get local copy of subsystem from global */
   subsys = &(SUBSYS[subsysnum]);
+
+  /* The reference number of channels depends on whether this spectrum is meant
+     to go in the SPECTRUM_RESULT or CALDATA part of the file (since CALDATA
+     can have more channels). */
+
+  /* if this is the first time through, we need to allocate resources based on the number
+     of channels that we have been given. */
+
+  if (subsys->nchans == 0) {
+
+    /* Number of data values per sequence */
+    nperseq = OBSINFO.nrecep * nchans;
+
+    /* Store the number of channels for this subsystem */
+    subsys->nchans = nchans;
+
+    /* Calculate the number of sequence steps that we are allowed to grow
+       before opening new file. */
+    subsys->maxsize = MAXBYTES / ( nperseq * SIZEOF_FLOAT );
+
+    /* Allocate a cache of bad values to simplify initialisation */
+    subsys->tdata.bad = starMalloc( nperseq * SIZEOF_FLOAT );
+    if (subsys->tdata.bad == NULL) {
+      if (*status == SAI__OK) {
+	*status = SAI__ERROR;
+	emsRep(" ","Unable to allocate memory for bad value cache", status );
+      }
+    } else {
+      for (i=0; i<nperseq; i++) {
+	(subsys->tdata.bad)[i] = VAL__BADR;
+      }
+    }
+
+    /* Allocate resources for this subsystem */
+    allocResources( &OBSINFO, subsys, subsys->maxsize, status );
+
+
+  } else if ( subsys->nchans != nchans ) {
+    *status = SAI__ERROR;
+    emsSetu( "IN", nchans );
+    emsSetu( "REF", subsys->nchans );
+    emsSetu( "SS", subsysnum );
+    emsRep( " ", "acsSpecWriteTS: Number of channels in subsystem ^SS has changed "
+	    "from ^REF to ^IN", status );
+    return;
+  }
+
 
   /* first thing to do is determine whether this sequence number is new or old */
 
