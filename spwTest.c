@@ -75,7 +75,7 @@
 
 /* Number of sequence steps in observation and the total number
    of spectra to write. SEQLEN is the length of a sequence in steps */
-#define NSEQ  ( OBSLENGTH * DUMPRATE )
+#define NSEQ  (int)( (float)OBSLENGTH * (float)DUMPRATE )
 #define SEQLEN 10
 #define NSPEC ( NSEQ * NRECEP * NSUBSYS )
 
@@ -125,6 +125,7 @@ main ( void ) {
   unsigned int seq;
   int exstat;
   unsigned int lseq;
+  const double rts_step = 1.0 / DUMPRATE;
 
   emsBegin( &status );
 
@@ -148,12 +149,14 @@ main ( void ) {
   /* intialise the record */
   record.pol_ang = 3.14159;
   record.rts_num = 0;
-  record.rts_step = 1.0 / DUMPRATE;
-  step_time_in_days = record.rts_step / SPD;
+  step_time_in_days = rts_step / SPD;
   record.rts_end  = 53797.0;
   strcpy(record.rts_tasks, "SIMULATOR");
   record.acs_trx = VAL__BADR;
   record.acs_tsys = VAL__BADR;
+  *(record.tcs_source) = '\0';
+  *(record.tcs_tr_sys) = '\0';
+  *(record.acs_source_ro) = '\0';
 
   /* Open NDF */
   for (i = 0; i < nsubsys; i++) {
@@ -161,7 +164,7 @@ main ( void ) {
     fits[i] = fitschan;
   }
 
-  acsSpecOpenTS( ".", 20060607, 53, NRECEP, nsubsys, nchans, (NSEQ/10), recepnames, &status);
+  acsSpecOpenTS( ".", 20060607, 53, NRECEP, nsubsys, recepnames, &status);
   c = 0;
   record.rts_endnum = 0;
   for (seq = 0; seq < NSEQ; seq++) {
@@ -177,7 +180,7 @@ main ( void ) {
     for (i = 0; i < NRECEP; i++) {
       record.acs_feed = i;
       record.acs_feedx = 1.0;
-      record.acs_feedy = VAL__BADD;
+      record.acs_feedy = 2.0;
 
       /* tweak content */
       for (j=0; j < NCHAN; j++) {
@@ -187,7 +190,7 @@ main ( void ) {
       for (j = 0; j < nsubsys; j++) {
 	gettimeofday(&tp1, NULL);
 	c++;
-	acsSpecWriteTS(j, spectrum2, &record, NULL, &status);
+	acsSpecWriteTS(j, nchans[j], spectrum2, &record, NULL, &status);
 	gettimeofday(&tp2, NULL);
 	diff = duration( &tp1, &tp2, &status);
 	if ( diff > 0.5 ) {
