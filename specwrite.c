@@ -53,11 +53,13 @@ typedef struct obsData {
   unsigned int nrecep;
   size_t receplen;       /* longest receptor name */
   char * recep_name_buff;  /* buffer for receptor names */
-  char datadir[MAXFILE+1];   /* current data directory */
   /* observation number, ut date and subscan number */
   unsigned int obsnum;
   unsigned int yyyymmdd;
   unsigned int nsubsys; /* Actual number of subsystems in use */
+  /* relevant data directories */
+  char datadir[MAXFILE+1];   /* current data directory */
+  char rootdir[MAXFILE+1];   /* root directory */
 } obsData;
 
 /* actual data (either in memory or mapped from disk) */
@@ -306,7 +308,7 @@ static size_t hdsRecordSizes[NEXTENSIONS];
 #define NGROW  (MAXRATE * PRESIZETIME)
 
 /* Number of bytes we should write before opening a new file */
-#define MAXBYTES ( 500 * 1024 * 1024 )
+#define MAXBYTES ( 1 * 1024 * 1024 )
 
 /* maximum number of sequence steps we can get out of sequence */
 #define MAXSEQERR  5
@@ -453,9 +455,11 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
   /* Create the directory to receive each subscan */
   sdir = createSubScanDir( dir, yyyymmdd, obsnum, status );
 
-  /* Store the resulting directory */
+  /* Store the resulting directory and root dir */
   strncpy(OBSINFO.datadir, sdir, MAXFILE);
   (OBSINFO.datadir)[MAXFILE] = '\0';
+  strncpy(OBSINFO.rootdir, dir, MAXFILE);
+  (OBSINFO.rootdir)[MAXFILE] = '\0';
 
 
   /* we need to store the receptor names somewhere locally */
@@ -599,8 +603,6 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
   int seqinc = 0;              /* did we increment sequence number? */
   unsigned int ngrow;          /* number of time slices to grow file */
   unsigned int reqnum;         /* number of time slices indicates by RTS sequence */
-  AstSpecFrame * template;     /* Template of a specFrame */
-  AstFrameSet  * foundframe;   /* Frameset from template to found frame */
   unsigned int tindex;         /* Position in sequence array for this sequence */
   unsigned int *rtsseqs;       /* Pointer to array of sequence numbers */
   unsigned int max_behind;     /* How many sequence steps to look behind */
@@ -716,7 +718,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
     if (record->rts_num == subsys->curseq) {
 
       tindex = subsys->curpos - 1;
-      /* printf("Reusing sequence %u at index %u\n", curseq[subsys], tindex);*/
+      printf("Reusing sequence %u at index %u\n", subsys->curseq, tindex);
 
     } else {
 
@@ -753,7 +755,6 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
     }
   }
   
-
   /* if the sequence number has incremented we need to increase the t-axis counter */
 
   if (seqinc) {
@@ -942,11 +943,11 @@ acsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
 
   /* Now need to open all the files that we have opened previously and adjust
      all the FITS headers. This is going to be problematic for the ones that
-     are related to sequence values.
+     are related to sequence values since this code does not have the HEADER_CONFIG.
   */
 
   /* Now need to write out the .ok file with all the files that we have opened */
-
+  /* writeOKFile(&OBSINFO, &SUBSYS, status); */
 
   /* Force globals to be reset */
   for (i = 0; i < maxsubsys; i++) {
@@ -1105,7 +1106,6 @@ static char * getDirName( const char * dir, unsigned int yyyymmdd,
 
   static char dirname[MAXFILE]; /* buffer for dirname - will be returned */
   int flen;                        /* Length of string */
-  char * root;                   /* Root filename */
 
   if (*status != SAI__OK) return NULL;
 
@@ -1671,7 +1671,7 @@ closeNDF( subSystem * subsys, int * status ) {
   }
 
 #if SPW_DEBUG
-  printf("Setting final bounds. Resize to %lld spectra\n", (unsigned long long)ubnd[TDIM]);
+  printf("Setting final bounds. Resize to %lld time steps\n", (unsigned long long)ubnd[TDIM]);
 #endif
   TIMEME( "Final set bounds", ndfSbnd(NDIMS, lbnd, ubnd, file->indf, status ););
 
@@ -1865,7 +1865,12 @@ resizeResources( const obsData *obsinfo, subSystem * subsys, unsigned int newsiz
 #if USE_MEMORY_CACHE
   /* Currently a bug since the memory should not be realloced */
   *status = SAI__ERROR;
-  emsRep(" ", "Should never be requested to realloc global buffer. Internal programming error",
+  emsSetu("SZ", newsize);
+  emsSetu("N", subsys->index);
+  emsSetu("OBS", obsinfo->obsnum);
+  emsRep(" ", "Should never be requested to realloc global buffer by ^SZ sequences"
+	 " (subsys ^N, obs ^OBS)."
+	 " Internal programming error",
 	 status );
 #else
   resizeNDF( obsinfo, subsys, newsize, status );
@@ -1875,6 +1880,8 @@ resizeResources( const obsData *obsinfo, subSystem * subsys, unsigned int newsiz
 
 static void
 flushResources( const obsData * obsinfo, subSystem * subsys, int * status ) {
+
+  subSystem * toclose;  /* pointer to subsystem struct we are actually closing */
 
 #if USE_MEMORY_CACHE
   subSystem output;  /* Some where to store file information */
@@ -1893,14 +1900,17 @@ flushResources( const obsData * obsinfo, subSystem * subsys, int * status ) {
   subsys->file.subscan = output.file.subscan;
 
   /* make sure we close the correct subsystem */
-  subsys = &output;
+  toclose = &output;
+#else
+  toclose = &subsys;
 
 #endif
 
-  closeNDF( subsys, status );
+  closeNDF( toclose, status );
 
   /* New position in buffer is the beginning */
   subsys->curpos = 0;
+  subsys->curseq = 0;
 
 }
 
