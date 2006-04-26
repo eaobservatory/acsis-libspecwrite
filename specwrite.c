@@ -10,6 +10,7 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #include <errno.h>
 
 /* Starlink includes */
@@ -53,7 +54,7 @@ typedef struct obsData {
   unsigned int nrecep;
   size_t receplen;       /* longest receptor name */
   char * recep_name_buff;  /* buffer for receptor names */
-  /* observation number, ut date and subscan number */
+  /* observation number, ut date and number of subsystems */
   unsigned int obsnum;
   unsigned int yyyymmdd;
   unsigned int nsubsys; /* Actual number of subsystems in use */
@@ -108,6 +109,8 @@ unsigned int CALLED = 0;     /* has openTS been called at least once */
 static void writeFitsChan( int indf, const AstFitsChan * fitschan, int * status );
 static char * getFileName( const char * dir, unsigned int yyyymmdd, unsigned int subsys,
 			   unsigned int obsnum, unsigned int subscan, int * status );
+static char * getOkFileName( const char * dir, unsigned int yyyymmdd,
+			   unsigned int obsnum, int * status );
 static char * getDirName( const char * dir, unsigned int yyyymmdd, 
 			   unsigned int obsnum, int * status );
 static char * getFileRoot( unsigned int yyyymmdd, unsigned int subsys,
@@ -709,7 +712,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
        large enough) */
     seqinc = 1;
     tindex = 0;
-    printf("First spectrum for this file for this subsystem\n");
+    /* printf("First spectrum for this file for this subsystem\n"); */
 
   } else {
     /* if the supplied value is the most recent value then we do not 
@@ -718,7 +721,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
     if (record->rts_num == subsys->curseq) {
 
       tindex = subsys->curpos - 1;
-      printf("Reusing sequence %u at index %u\n", subsys->curseq, tindex);
+      /* printf("Reusing sequence %u at index %u\n", subsys->curseq, tindex); */
 
     } else {
 
@@ -907,9 +910,18 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 void
 acsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
 
+  int fd;                   /* file descriptor of temp ok file */
+  FILE * fstream = NULL;    /* Stream associated with temp ok file */
+  char * fname;             /* file name of a given subscan */
+  int flen;                 /* length of return value from snprintf */
   unsigned int i;           /* Loop counter */
+  unsigned int j;           /* Loop counter */
+  char * ldir = NULL;       /* subscan directory relative to rootdir */
   int found = 0;            /* Found an open NDF? */
   subSystem * subsys;       /* specific subsystem */
+  char tmpok[MAXFILE];      /* temporary file name */
+  char *okfile;             /* name of ok file */
+  int sysstat;              /* system status return */
 
   /* Always check status on entry */
   if (*status != SAI__OK) return;
@@ -918,14 +930,15 @@ acsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
   if (!INPROGRESS) {
     *status = SAI__ERROR;
     emsRep("HDS_SPEC_CLOSETS_ERR1",
-	   "acsSpecCloseTS called, yet an observation has not been initialised", status);
+	   "acsSpecCloseTS called, yet an observation has not been initialised",
+	   status);
     return;
   }
 
 
   /* Loop over each NDF to write fits header and to close it */
   found = 0;
-  for (i = 0; i < maxsubsys; i++) {
+  for (i = 0; i < OBSINFO.nsubsys; i++) {
     /* Get local copy of subsystem from global */
     subsys = &(SUBSYS[i]);
     if ( subsys->file.indf != NDF__NOID || subsys->tdata.spectra != NULL) {
@@ -946,13 +959,85 @@ acsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
      are related to sequence values since this code does not have the HEADER_CONFIG.
   */
 
-  /* Now need to write out the .ok file with all the files that we have opened */
-  /* writeOKFile(&OBSINFO, &SUBSYS, status); */
+  /* Now need to write out the .ok file with all the files that we have opened.
+     We must first write to a temporary file so that we can rename it when it
+     is complete.
+  */
+  if ( *status == SAI__OK ) {
+    flen = snprintf(tmpok, MAXFILE, "%s/tempXXXXXX.ok", OBSINFO.rootdir );
+    if (flen >= MAXFILE) {
+      *status = SAI__ERROR;
+      emsRep(" ","Error forming temporary 'ok' filename. Exceeded buffer",
+	     status );
+    }
+    /* get a temporary file */
+    if (*status == SAI__OK) {
+      fd = mkstemps( tmpok, 3 ); /* .ok is 3 characters */
+      if (fd == -1) {
+	*status = SAI__ERROR;
+	emsSyser( "ERRNO", errno );
+	emsSetc( "DIR", OBSINFO.rootdir );
+	emsSetc( "TMP", tmpok );
+	emsRep(" ","acsSpecCloseTS: Failed to open temporary 'ok' file ^TMP in dir ^DIR:"
+	       " ^ERRNO", status );
+      }
+    }
+    /* use stream I/O so open this on a stream */
+    if (*status == SAI__OK) {
+      fstream = fdopen( fd, "w+" );
+      if (!fstream) {
+	*status = SAI__ERROR;
+	emsSyser( "ERRNO", errno );
+	emsRep(" ","acsSpecCloseTS: Failed to open stream on 'ok' file descriptor:"
+	       " ^ERRNO", status);
+      }
+    }
+  }
+
+  /* for each subsystem, for each subscan, write a FITS header and entry in ok
+     file */
+  if (*status == SAI__OK) {
+
+    for (i = 0; i < OBSINFO.nsubsys; i++) {
+      /* local subsystem */
+      subsys = &(SUBSYS[i]);
+
+      /* subscans start counting at 1 */
+      for (j = 1; j <= subsys->file.subscan ; j++ ) {
+	/* contents of okay file are relative to data dir but should
+	   not include datadir itself */
+	ldir = getDirName( NULL, OBSINFO.yyyymmdd, OBSINFO.obsnum, status );
+	fname = getFileName( ldir, OBSINFO.yyyymmdd, i,
+			     OBSINFO.obsnum, j, status );
+	fprintf( fstream, "%s\n", fname );
+      }
+
+    }
+  }
+
+
+  /* rename temp file to okfile and close temp file */
+  okfile = getOkFileName( OBSINFO.rootdir, OBSINFO.yyyymmdd,
+			  OBSINFO.obsnum, status );
+  if (*status == SAI__OK) {
+    sysstat = rename(tmpok, okfile);
+    if (sysstat == -1) {
+	*status = SAI__ERROR;
+	emsSyser( "ERRNO", errno );
+	emsSetc( "F", tmpok);
+	emsSetc( "T", okfile );
+	emsRep(" ","acsSpecCloseTS: Error renaming okay file from '^F'"
+	       " to ^T: ^ERRNO", status);
+    }
+    /* close temporary file descriptor and stream */
+    fclose( fstream ); /* also closes fd */
+  }
 
   /* Force globals to be reset */
   for (i = 0; i < maxsubsys; i++) {
     memset( &(SUBSYS[i]), 0, sizeof(SUBSYS[i]) );
   }
+  memset( &OBSINFO, 0, sizeof(OBSINFO) );
 
   /* reset progress */
   INPROGRESS = 0;
@@ -1056,6 +1141,37 @@ static char * getFileName( const char * dir, unsigned int yyyymmdd, unsigned int
   return filename;
 }
 
+/* Form the OK file name
+   - returns a pointer to static memory.
+ */
+
+static char * getOkFileName( const char * dir, unsigned int yyyymmdd,
+			     unsigned int obsnum, int * status ) {
+
+  static char filename[MAXFILE]; /* buffer for filename - will be returned */
+  int flen;                        /* Length of string */
+  char * root;                   /* Root filename */
+
+  if (*status != SAI__OK) return NULL;
+  root = getFileRoot( yyyymmdd, 0, obsnum, 0, status );
+  if (*status != SAI__OK) return NULL;
+
+  /* Form the file name - assume posix filesystem */
+  flen = snprintf(filename, MAXFILE, "%s/.%s.ok", dir, root );
+
+  if (flen >= MAXFILE) {
+    *status = SAI__ERROR;
+    emsSeti("SZ", MAXFILE );
+    emsSetu("N", obsnum );
+    emsSetu("UT", yyyymmdd );
+    emsRep("HDS_SPEC_OPEN_ERR1",
+	   "Error forming Ok filename. Exceeded buffer size of ^SZ chars for scan ^N on UT ^UT", status );
+    return NULL;
+  }
+
+  return filename;
+}
+
 /* Get the root of the name. No directory and no suffix.
    If subscan is zero, the subscan is not included (useful for building directory name).
    Returns static memory.
@@ -1097,7 +1213,7 @@ static char * getFileRoot( unsigned int yyyymmdd, unsigned int subsys,
 /* Form the directory name
    To comply with the SCUBA-2 ICD we only use the observation number when
    constructing the directory name.
-
+   - if "dir" is NULL or zero length  no directory is prefixed
    - returns a pointer to static memory.
  */
 
@@ -1109,8 +1225,14 @@ static char * getDirName( const char * dir, unsigned int yyyymmdd,
 
   if (*status != SAI__OK) return NULL;
 
-  /* Form the file name - assume posix filesystem */
-  flen = snprintf(dirname, MAXFILE, "%s/%05u", dir, obsnum );
+  /* check for null directory  and make sure we do not have a separator
+     if null */
+  if ( dir != NULL && strlen(dir) > 0) {
+    /* Form the file name - assume posix filesystem */
+    flen = snprintf(dirname, MAXFILE, "%s/%05u", dir, obsnum );
+  } else {
+    flen = snprintf(dirname, MAXFILE, "%05u", obsnum );
+  }
 
   if (flen >= MAXFILE) {
     *status = SAI__ERROR;
