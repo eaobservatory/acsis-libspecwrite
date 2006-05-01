@@ -964,7 +964,13 @@ acsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
      is complete.
   */
   if ( *status == SAI__OK ) {
-    flen = snprintf(tmpok, MAXFILE, "%s/tempXXXXXX.ok", OBSINFO.rootdir );
+    flen = snprintf(tmpok, MAXFILE,
+#if HAVE_MKSTEMPS
+		    "%s/tempXXXXXX.ok",
+#elif HAVE_MKSTEMP
+		    "%s/tempXXXXXX",
+#endif
+		    OBSINFO.rootdir );
     if (flen >= MAXFILE) {
       *status = SAI__ERROR;
       emsRep(" ","Error forming temporary 'ok' filename. Exceeded buffer",
@@ -972,7 +978,13 @@ acsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
     }
     /* get a temporary file */
     if (*status == SAI__OK) {
+#if HAVE_MKSTEMPS
       fd = mkstemps( tmpok, 3 ); /* .ok is 3 characters */
+#elif HAVE_MKSTEMP
+      fd = mkstemp( tmpok );
+#else
+      UNABLE TO CREATE A TEMPORARY FILE
+#endif
       if (fd == -1) {
 	*status = SAI__ERROR;
 	emsSyser( "ERRNO", errno );
