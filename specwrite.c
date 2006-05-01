@@ -311,7 +311,7 @@ static size_t hdsRecordSizes[NEXTENSIONS];
 #define NGROW  (MAXRATE * PRESIZETIME)
 
 /* Number of bytes we should write before opening a new file */
-#define MAXBYTES ( 1 * 1024 * 1024 )
+#define MAXBYTES ( 512 * 1024 * 1024 )
 
 /* maximum number of sequence steps we can get out of sequence */
 #define MAXSEQERR  5
