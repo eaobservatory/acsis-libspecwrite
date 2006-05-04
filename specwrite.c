@@ -2016,9 +2016,23 @@ static void
 flushResources( const obsData * obsinfo, subSystem * subsys, int * status ) {
 
   subSystem * toclose;  /* pointer to subsystem struct we are actually closing */
+  double percent = 0.0;
+
+  if (*status != SAI__OK) return;
 
 #if USE_MEMORY_CACHE
   subSystem output;  /* Some where to store file information */
+
+#if SPW_DEBUG
+  if (subsys->cursize > 0) {
+    percent = 100.0 * subsys->curpos / subsys->cursize;
+  }
+  printf("Flushing with memory cache = %u/%u (%.1f%% capacity)\n", subsys->curpos,subsys->cursize, percent);
+#endif
+
+  /* if we have no spectra we have nothing to write so do not want
+     to open the NDF - should we set status? */
+  if (subsys->curpos == 0) return;
 
   /* initialise the output */
   memset( &output, 0, sizeof(subSystem));
