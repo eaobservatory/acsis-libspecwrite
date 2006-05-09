@@ -31,7 +31,10 @@
 
 /* Debug prints */
 
+/* Standard debugging messages */
 #define SPW_DEBUG 1
+/* Extra debugging messages */
+#define SPW_DEBUG_LEVEL2 0
 
 /* Largest file name allowed (including path) */
 #define MAXFILE 1024
@@ -194,7 +197,7 @@ static double duration ( struct timeval * tp1, struct timeval * tp2 );
     if (tpdiff > LONGTIME) printf( ">>>>>>>>>>>>>>>>>" label " took %.3f seconds <<<<<<<<<<<<<<<\n", tpdiff); \
   }
 #else
-#define TIMEME(func)  func
+#define TIMEME(label, func)  func
 #endif
 
 /* Macro to check subsys range */
@@ -312,6 +315,19 @@ static size_t hdsRecordSizes[NEXTENSIONS];
 
 /* Number of bytes we should write before opening a new file */
 #define MAXBYTES ( 512 * 1024 * 1024 )
+
+/* if we have unfeasibly small spectra and 1 receptor we could get
+   a very large requirement for memory for all the extensions
+   associated with MAXBYTES above. Therefore limit the number of 
+   sequence steps we can actual get.
+   Peak rate is 10 MB/s which would be maxseq of 
+          MAXBYTES / (4 * 8192 * MAXRECEP) = 1024 sequences
+   whereas min rate gives
+          MAXBYTES / (4 *    1 * 1       ) = 134 million sequences
+   or more feasibly
+          MAXBYTES / (4 * 1024 * 1       ) = 130,000 sequences
+ */
+#define MAXSEQ ( MAXBYTES / ( 4 * 1024 * 1 ) )
 
 /* maximum number of sequence steps we can get out of sequence */
 #define MAXSEQERR  5
@@ -609,7 +625,9 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
   unsigned int tindex;         /* Position in sequence array for this sequence */
   unsigned int *rtsseqs;       /* Pointer to array of sequence numbers */
   unsigned int max_behind;     /* How many sequence steps to look behind */
+  unsigned int maxseq;         /* calculated maximum number of sequence steps allowed */
   unsigned int nperseq;        /* Number of elements per sequence */
+  unsigned int inpos;          /* curpos on entry */
 
   int found = 0;               /* Did we find the sequence? */
   unsigned int i;              /* loop counter */
@@ -657,6 +675,9 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
   /* Get local copy of subsystem from global */
   subsys = &(SUBSYS[subsysnum]);
 
+  /* store the input curpos */
+  inpos = subsys->curpos;
+
   /* The reference number of channels depends on whether this spectrum is meant
      to go in the SPECTRUM_RESULT or CALDATA part of the file (since CALDATA
      can have more channels). */
@@ -674,7 +695,12 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 
     /* Calculate the number of sequence steps that we are allowed to grow
        before opening new file. */
-    subsys->maxsize = MAXBYTES / ( nperseq * SIZEOF_FLOAT );
+    maxseq = MAXBYTES / ( nperseq * SIZEOF_FLOAT );
+    subsys->maxsize = ( maxseq > MAXSEQ ? MAXSEQ : maxseq );
+
+#if SPW_DEBUG_LEVEL2
+    printf("Calculated maximum number of sequence steps per file: %u\n", subsys->maxsize);
+#endif
 
     /* Allocate a cache of bad values to simplify initialisation */
     subsys->tdata.bad = starMalloc( nperseq * SIZEOF_FLOAT );
@@ -744,14 +770,18 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
       }
 
       if (found == 0) {
+#if SPW_DEBUG_LEVEL2
 	printf("Did not find sequence %u\n", record->rts_num);
+#endif
 	/* did not find this sequence number so it is a new one */
 	tindex = subsys->curpos; /* curpos will be incremented */
 	seqinc = 1;
       } else {
 	/* going back in time so this may not be efficient */
+#if SPW_DEBUG_LEVEL2
 	printf("Sequence %u matches index %u. Previous seq num=%u\n", 
 	       record->rts_num, tindex, subsys->curseq);
+#endif
 	subsys->curseq = record->rts_num;
 
       }
@@ -761,6 +791,10 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
   /* if the sequence number has incremented we need to increase the t-axis counter */
 
   if (seqinc) {
+
+#if SPW_DEBUG_LEVEL2
+    printf("Incrementing sequence number to sequence %u\n", record->rts_num);
+#endif
 
     /* store the new value */
     subsys->curseq = record->rts_num;
@@ -776,6 +810,21 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 
     if ( record->rts_endnum > record->rts_num ) {
       reqnum = record->rts_endnum - record->rts_num + 1;
+    }
+
+    /* if the required number exceeds the maximum allowed size then 
+       we need to reduce the reqnum to a more manageable level and
+       hope that we can flush in the middle of a sequence. We could simply
+       set it to one more than the current size (we just need to prevent
+       the file from being flushed when empty) but if resizing is required,
+       we may as well give a good hint rather than resize each time around.
+     */
+    if ( reqnum > (subsys->maxsize - subsys->curpos) ) {
+#if SPW_DEBUG_LEVEL2
+      printf("Length of sequence = %u Maxspace = %u Currently=%u\n",
+	      reqnum, subsys->maxsize, subsys->curpos);
+#endif
+      reqnum = subsys->maxsize - subsys->curpos;
     }
 
     if ( (subsys->curpos + reqnum - 1) > subsys->cursize ) {
@@ -814,9 +863,16 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 	/* indicate that we are starting at the beginning with the next spectrum */
 	tindex = 0;
 
+	/* current position must be 1 now since we still have to write the
+	   spectrum, so force it to that.
+	    - allocResources does not set this, but flushResources resets to 0 */
+	subsys->curpos = 1;
+
       } else {
-	printf("Cursize: %u Curpos: %u ngrow: %u maxsize: %u\n",
+#if SPW_DEBUG
+	printf("Cursize: %u Curpos: %u ngrow: %u maxsize: %u ; Need to resize.\n",
 	       subsys->cursize, subsys->curpos, ngrow, subsys->maxsize); 
+#endif
 	/* Resize the NDF */
 	resizeResources( &OBSINFO, subsys, ngrow, status );
       }
@@ -825,11 +881,21 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 
   /* copy in the data */
   if (*status == SAI__OK) {
-    
+
+#if SPW_DEBUG
+    if (seqinc) {
+      printf(">>> About to write first spectrum at position %u\n", tindex);
+    }
+#endif
     /* Calculate offset into array - number of spectra into the array times number of
        channels per spectrum. */
     offset = calcOffset( subsys->nchans, OBSINFO.nrecep,
 			 record->acs_feed, tindex, status );
+
+#if SPW_DEBUG_LEVEL2
+    printf(">><<>> Writing spectrum to tindex %u curpos %u offset %u\n",
+	   tindex, subsys->curpos, offset);
+#endif
 
     data = (subsys->tdata.spectra);
     recdata = (subsys->tdata.jcmtstate);
@@ -842,6 +908,31 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
     if (seqinc) writeRecord( recdata, tindex, record, status );
     writeRecepPos( &OBSINFO, posdata, tindex, record, status );
 
+#if SPW_DEBUG_LEVEL2
+    if (seqinc) {
+      printf(">>> Wrote first spectrum "
+#  if USE_MEMORY_CACHE
+	     "to memory cache "
+#  else
+	     "to disk "
+#  endif  /* USE_MEMORY_CACHE */
+	     "at this position %u (curpos = %u)\n", tindex, subsys->curpos );
+    }
+#endif  /* SPW_DEBUG_LEVEL2 */
+
+    /* Sanity check - curpos must either be 1 or one bigger than
+       earlier if we added a new sequence. It can not be 0 if a spectrum
+       was supplied and we added a new sequence.
+    */
+    if (*status == SAI__OK && seqinc) {
+      if (subsys->curpos != 1 && subsys->curpos != (inpos + 1) ) {
+	*status = SAI__ERROR;
+	emsSetu( "IN", inpos);
+	emsSetu( "OUT", subsys->curpos);
+	emsRep(" ", "acsSpecWriteTS: Needed to write new sequence but seemingly overwote:"
+	       " (input position was ^IN, output was ^OUT)", status);
+      }
+    }
   }
 
   return;
@@ -2016,7 +2107,9 @@ static void
 flushResources( const obsData * obsinfo, subSystem * subsys, int * status ) {
 
   subSystem * toclose;  /* pointer to subsystem struct we are actually closing */
+#if SPW_DEBUG
   double percent = 0.0;
+#endif
 
   if (*status != SAI__OK) return;
 
