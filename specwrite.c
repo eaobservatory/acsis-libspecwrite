@@ -72,6 +72,9 @@ typedef struct specData {
   double * receppos; /* Receptor positions (2 x  nrecep x nseq) */
   void   * jcmtstate[NEXTENSIONS];  /* Pointers to JCMTSTATE information */
   float  * bad;      /* array of bad values to easily initialise new time slice */
+  unsigned char * count;    /* array of size (nrecep x nseq) containing 1 if spectrum written
+                               else 0. Can be used to indicate when all spectra received
+                               or if overwriting a spectrum. */
 } specData;
 
 /* This struct contains file information (ndf identifiers, hds locators) */
@@ -585,6 +588,9 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 *        Use structured globals
 *     21-APR-2006 (TIMJ):
 *        Dynamically allocate memory based on first spectrum arriving.
+*     09-MAY-2006 (TIMJ):
+*        Keep track of all spectra arriving so we can determine
+*        when all spectra for a sequence have arrived.
 
 *  Notes:
 *     - Must have previously called acsSpecOpenTS.
@@ -619,6 +625,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 
   float * data; /* local copy of mapped pointer to spectrum */
   unsigned int offset;         /* offset into data array */
+  unsigned int coff;           /* offset into count array */
   int seqinc = 0;              /* did we increment sequence number? */
   unsigned int ngrow;          /* number of time slices to grow file */
   unsigned int reqnum;         /* number of time slices indicates by RTS sequence */
@@ -628,6 +635,8 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
   unsigned int maxseq;         /* calculated maximum number of sequence steps allowed */
   unsigned int nperseq;        /* Number of elements per sequence */
   unsigned int inpos;          /* curpos on entry */
+  int missing = 0;             /* any spectra missing from this sequence? */
+  unsigned int last_seqnum = 0; /* Sequence number encountered for previous spectrum in this slot */
 
   int found = 0;               /* Did we find the sequence? */
   unsigned int i;              /* loop counter */
@@ -713,6 +722,17 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
       for (i=0; i<nperseq; i++) {
 	(subsys->tdata.bad)[i] = VAL__BADR;
       }
+    }
+
+    /* Allocate the count array */
+    subsys->tdata.count = starMalloc( OBSINFO.nrecep * subsys->maxsize * sizeof(unsigned char) );
+    if (subsys->tdata.count == NULL) {
+      if (*status == SAI__OK) {
+	*status = SAI__ERROR;
+	emsRep(" ","Unable to allocate memory for count array", status );
+      }
+    } else {
+      memset( subsys->tdata.count, 0, OBSINFO.nrecep * subsys->maxsize * sizeof(unsigned char) );
     }
 
     /* Allocate resources for this subsystem */
@@ -884,7 +904,8 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 
 #if SPW_DEBUG
     if (seqinc) {
-      printf(">>> About to write first spectrum at position %u\n", tindex);
+      printf(">>> About to write first spectrum at position %u for sequence %u\n", tindex,
+	     subsys->curseq);
     }
 #endif
     /* Calculate offset into array - number of spectra into the array times number of
@@ -892,24 +913,89 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
     offset = calcOffset( subsys->nchans, OBSINFO.nrecep,
 			 record->acs_feed, tindex, status );
 
-#if SPW_DEBUG_LEVEL2
-    printf(">><<>> Writing spectrum to tindex %u curpos %u offset %u\n",
-	   tindex, subsys->curpos, offset);
-#endif
-
+    /* Get local copies of pointers */
     data = (subsys->tdata.spectra);
     recdata = (subsys->tdata.jcmtstate);
     posdata = (subsys->tdata.receppos);
 
-    memcpy( &(data[offset]), spectrum, subsys->nchans*SIZEOF_FLOAT );
+    /* We would like to know the sequence number that was used previously for this
+       time slot */
+    last_seqnum = 0;
+    if (!seqinc) last_seqnum = (((unsigned int *)recdata[RTS_NUM])[tindex]);
+
+    /* Calculate offset into count array: a  */
+    coff = calcOffset( 1, OBSINFO.nrecep, record->acs_feed, tindex, status );
+
+    /* check to make sure this slot is free */
+    if ( (subsys->tdata.count)[coff] != 0) {
+      if (*status == SAI__OK) {
+	*status = SAI__ERROR;
+	emsSetu("CURSEQ", subsys->curseq );
+	emsSetu("PREVSEQ", last_seqnum);
+	emsSetu("FEED", record->acs_feed );
+	if ( (subsys->tdata.count)[coff] == 1 ) {
+	  emsRep(" ", "acsSpecWriteTS: Error. Overwriting a slot that already contains a spectrum"
+		 " (current sequence number = ^CURSEQ, previous sequence was ^PREVSEQ,"
+		 " feed number = ^FEED)", status );
+	} else {
+	  emsSetu("NWRITE", (unsigned int)(subsys->tdata.count)[coff]);
+	  emsRep( " ","acsSpecWriteTS: Error. Bizarrely have already written ^NWRITE"
+		  " spectra to this slot (current sequence number = ^CURSEQ, feed = ^FEED)",
+		  status);
+	}
+      }
+    }
+
+    /* sanity check the sequence numbers in this spectrum with that already stored
+       if we have not just started a new sequence */
+    if ( !seqinc && subsys->curseq != last_seqnum) {
+      if (*status == SAI__OK) {
+	*status = SAI__ERROR;
+	emsSetu( "LAST", last_seqnum );
+	emsSetu( "CUR", subsys->curseq);
+	emsRep(" ","Last time this slot was used it had sequence number ^LAST"
+	       " but now it has value ^CUR.", status);
+      }
+    }
+
+#if SPW_DEBUG_LEVEL2
+    printf(">><<>> Writing spectrum from feed %u to tindex %u curpos %u offset %u\n",
+	   record->acs_feed, tindex, subsys->curpos, offset);
+#endif
+
+    if (*status == SAI__OK)
+      memcpy( &(data[offset]), spectrum, subsys->nchans*SIZEOF_FLOAT );
 
     /* Store record data and receptor positions. Base record only updates each
        sequence step but recepot position should be written for all records. */
     if (seqinc) writeRecord( recdata, tindex, record, status );
     writeRecepPos( &OBSINFO, posdata, tindex, record, status );
 
+    /* increment the count for this location */
+    if (*status == SAI__OK) (subsys->tdata.count)[coff]++;
+
+    /* see whether this sequence is complete */
+    coff = calcOffset( 1, OBSINFO.nrecep, 0, tindex, status );
+    missing = 0;
+    for (i=0; i < OBSINFO.nrecep; i++) {
+      if ( (subsys->tdata.count)[coff+i] == 0 ) {
+	missing = 1;
+	break;
+      }
+    }
+    if (!missing) {
+#if SPW_DEBUG
+      printf("<<< Sequence %u (tindex=%u) completed with this spectrum for feed %u\n",
+	     subsys->curseq, tindex, record->acs_feed);
+#endif
+      /* We *could* flush to disk at this point if we do not think the next sequence
+	 will fit. This may alleviate network contention if we end up dumping the
+	 file at the start of a sequence. */
+
+    }
+
 #if SPW_DEBUG_LEVEL2
-    if (seqinc) {
+    if (seqinc && *status == SAI__OK) {
       printf(">>> Wrote first spectrum "
 #  if USE_MEMORY_CACHE
 	     "to memory cache "
@@ -933,7 +1019,8 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 	       " (input position was ^IN, output was ^OUT)", status);
       }
     }
-  }
+
+  } /* status ok for writing a spectrum */
 
   return;
 }
@@ -970,10 +1057,15 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 *        Original version.
 *     20-APR-2006 (TIMJ):
 *        Use structured globals.
+*     09-MAY-2006 (TIMJ):
+*        Attempt to run even if status is bad on entry.
 
 *  Notes:
 *     - Must have previously called acsSpecOpenTS.
 *     - File is resized to the actual number of spectra written.
+*     - If status is bad on entry this routine will attempt to execute
+*       so that spectra will be written rather than deleted from internal
+*       memory.
 
 *  Copyright:
 *     Copyright (C) 2006 Particle Physics and Astronomy Research Council.
@@ -1013,36 +1105,47 @@ acsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
   char tmpok[MAXFILE];      /* temporary file name */
   char *okfile;             /* name of ok file */
   int sysstat;              /* system status return */
+  int lstat = SAI__OK;      /* Local status */
 
-  /* Always check status on entry */
-  if (*status != SAI__OK) return;
+  /* Ideally should not automatically abort on entry since we may be required
+     to save the spectra that we have already been given. The trick is in proceeding
+     if we can report that spectra have been written (either because curpos is non-zero
+     or because the subscan number is non-zero). If status was bad on entry we should
+     not add to the error message stack. If it was good on entry we should add to the
+     stack. This requires conditional use of emsMark and emsRlse and using an internal
+     error status value.
+  */
 
   /* Check to see if we've already been called */
   if (!INPROGRESS) {
-    *status = SAI__ERROR;
-    emsRep("HDS_SPEC_CLOSETS_ERR1",
-	   "acsSpecCloseTS called, yet an observation has not been initialised",
-	   status);
+    if (*status == SAI__OK) {
+      *status = SAI__ERROR;
+      emsRep("HDS_SPEC_CLOSETS_ERR1",
+	     "acsSpecCloseTS called, yet an observation has not been initialised",
+	     status);
+    }
     return;
   }
 
+  /* Start new error context if status is bad */
+  if (*status != SAI__OK) emsMark();
 
-  /* Loop over each NDF to write fits header and to close it */
+  /* Loop over each subsystem and flush cached spectra to disk */
   found = 0;
   for (i = 0; i < OBSINFO.nsubsys; i++) {
     /* Get local copy of subsystem from global */
     subsys = &(SUBSYS[i]);
     if ( subsys->file.indf != NDF__NOID || subsys->tdata.spectra != NULL) {
       found = 1;
-      flushResources( &OBSINFO, subsys, status);
+      flushResources( &OBSINFO, subsys, &lstat);
     }
-    freeResources( &OBSINFO, subsys, status );
+    freeResources( &OBSINFO, subsys, &lstat );
   }
 
   /* report error if not found any open NDFs */
-  if (*status == SAI__OK && !found) {
-    *status = SAI__ERROR;
-    emsRep(" ", "acsSpecCloseTS: Failed to find open NDF components", status );
+  if (lstat == SAI__OK && !found) {
+    lstat = SAI__ERROR;
+    emsRep(" ", "acsSpecCloseTS: Failed to find open NDF components", &lstat );
   }
 
   /* Now need to open all the files that we have opened previously and adjust
@@ -1054,7 +1157,7 @@ acsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
      We must first write to a temporary file so that we can rename it when it
      is complete.
   */
-  if ( *status == SAI__OK ) {
+  if ( lstat == SAI__OK ) {
     flen = snprintf(tmpok, MAXFILE,
 #if HAVE_MKSTEMPS
 		    "%s/tempXXXXXX.ok",
@@ -1062,13 +1165,13 @@ acsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
 		    "%s/tempXXXXXX",
 #endif
 		    OBSINFO.rootdir );
-    if (flen >= MAXFILE) {
-      *status = SAI__ERROR;
+    if (flen >= MAXFILE && lstat == SAI__OK) {
+      lstat = SAI__ERROR;
       emsRep(" ","Error forming temporary 'ok' filename. Exceeded buffer",
-	     status );
+	     &lstat );
     }
     /* get a temporary file */
-    if (*status == SAI__OK) {
+    if (lstat == SAI__OK) {
 #if HAVE_MKSTEMPS
       fd = mkstemps( tmpok, 3 ); /* .ok is 3 characters */
 #elif HAVE_MKSTEMP
@@ -1077,29 +1180,29 @@ acsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
       UNABLE TO CREATE A TEMPORARY FILE
 #endif
       if (fd == -1) {
-	*status = SAI__ERROR;
+	lstat = SAI__ERROR;
 	emsSyser( "ERRNO", errno );
 	emsSetc( "DIR", OBSINFO.rootdir );
 	emsSetc( "TMP", tmpok );
 	emsRep(" ","acsSpecCloseTS: Failed to open temporary 'ok' file ^TMP in dir ^DIR:"
-	       " ^ERRNO", status );
+	       " ^ERRNO", &lstat );
       }
     }
     /* use stream I/O so open this on a stream */
-    if (*status == SAI__OK) {
+    if (lstat == SAI__OK) {
       fstream = fdopen( fd, "w+" );
       if (!fstream) {
-	*status = SAI__ERROR;
+	lstat = SAI__ERROR;
 	emsSyser( "ERRNO", errno );
 	emsRep(" ","acsSpecCloseTS: Failed to open stream on 'ok' file descriptor:"
-	       " ^ERRNO", status);
+	       " ^ERRNO", &lstat);
       }
     }
   }
 
   /* for each subsystem, for each subscan, write a FITS header and entry in ok
      file */
-  if (*status == SAI__OK) {
+  if (lstat == SAI__OK) {
 
     for (i = 0; i < OBSINFO.nsubsys; i++) {
       /* local subsystem */
@@ -1109,9 +1212,9 @@ acsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
       for (j = 1; j <= subsys->file.subscan ; j++ ) {
 	/* contents of okay file are relative to data dir but should
 	   not include datadir itself */
-	ldir = getDirName( NULL, OBSINFO.yyyymmdd, OBSINFO.obsnum, status );
+	ldir = getDirName( NULL, OBSINFO.yyyymmdd, OBSINFO.obsnum, &lstat );
 	fname = getFileName( ldir, OBSINFO.yyyymmdd, i,
-			     OBSINFO.obsnum, j, status );
+			     OBSINFO.obsnum, j, &lstat );
 	fprintf( fstream, "%s\n", fname );
       }
 
@@ -1121,16 +1224,16 @@ acsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
 
   /* rename temp file to okfile and close temp file */
   okfile = getOkFileName( OBSINFO.rootdir, OBSINFO.yyyymmdd,
-			  OBSINFO.obsnum, status );
-  if (*status == SAI__OK) {
+			  OBSINFO.obsnum, &lstat );
+  if (lstat == SAI__OK) {
     sysstat = rename(tmpok, okfile);
     if (sysstat == -1) {
-	*status = SAI__ERROR;
+	lstat = SAI__ERROR;
 	emsSyser( "ERRNO", errno );
 	emsSetc( "F", tmpok);
 	emsSetc( "T", okfile );
 	emsRep(" ","acsSpecCloseTS: Error renaming okay file from '^F'"
-	       " to ^T: ^ERRNO", status);
+	       " to ^T: ^ERRNO", &lstat);
     }
     /* close temporary file descriptor and stream */
     fclose( fstream ); /* also closes fd */
@@ -1145,10 +1248,20 @@ acsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
   /* reset progress */
   INPROGRESS = 0;
 
-  if (*status != SAI__OK) {
-    emsRep( " ", "Error closing Spectrum file", status );
+  if (lstat != SAI__OK) {
+    emsRep( " ", "Error closing Spectrum file", &lstat );
   }
 
+  /* release the mark if status on entry was bad so that 
+     we do not contaminate the error stack. */
+  if (*status != SAI__OK) {
+    if (lstat != SAI__OK) emsAnnul( &lstat );
+    emsRlse();
+  } else {
+    /* make sure that the exit status is returned */
+    *status = lstat;
+  }
+ 
 }
 
 /*********************** HELPER FUNCTIONS (PRIVATE) *****************************/
@@ -2120,7 +2233,8 @@ flushResources( const obsData * obsinfo, subSystem * subsys, int * status ) {
   if (subsys->cursize > 0) {
     percent = 100.0 * subsys->curpos / subsys->cursize;
   }
-  printf("Flushing with memory cache = %u/%u (%.1f%% capacity)\n", subsys->curpos,subsys->cursize, percent);
+  printf("Flushing with memory cache = %u/%u (%.1f%% capacity)\n", subsys->curpos,
+	 subsys->cursize, percent);
 #endif
 
   /* if we have no spectra we have nothing to write so do not want
@@ -2148,6 +2262,10 @@ flushResources( const obsData * obsinfo, subSystem * subsys, int * status ) {
 #endif
 
   closeNDF( toclose, status );
+
+  /* Reset count array */
+  if (subsys->tdata.count) 
+    memset( subsys->tdata.count, 0, obsinfo->nrecep * subsys->maxsize * sizeof(unsigned char) );
 
   /* New position in buffer is the beginning */
   subsys->curpos = 0;
@@ -2183,6 +2301,11 @@ static void freeResources ( obsData * obsinfo, subSystem * subsys, int * status)
   if (subsys->tdata.bad != NULL) {
     starFree( subsys->tdata.bad );
     subsys->tdata.bad = NULL;
+  }
+
+  if (subsys->tdata.count != NULL) {
+    starFree( subsys->tdata.count );
+    subsys->tdata.count = NULL;
   }
 
   if (obsinfo->recep_name_buff != NULL) {
