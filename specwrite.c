@@ -98,6 +98,8 @@ typedef struct subSystem {
   unsigned int curseq;  /* current RTS sequence number */
   unsigned int curpos;  /* current index position in the cube (water mark level) */
   unsigned int nchans;  /* number of spectral channels in this subsystem */
+  unsigned int inseq;   /* We are in a sequence */
+  unsigned int seqlen;  /* Expected length of this sequence */
   specData     tdata;   /* Actual data */        
   fileInfo     file;    /* File data (can be none if file.infd == NDF__NOID) */
 } subSystem;
@@ -832,6 +834,14 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
       reqnum = record->rts_endnum - record->rts_num + 1;
     }
 
+    /* Calculate the length of this sequence if it is started by this
+       sequence step. */
+    if (!subsys->inseq) {
+      subsys->seqlen = reqnum;
+      subsys->inseq = 1; /* we are now in a sequence */
+    }
+
+
     /* if the required number exceeds the maximum allowed size then 
        we need to reduce the reqnum to a more manageable level and
        hope that we can flush in the middle of a sequence. We could simply
@@ -990,9 +1000,19 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 #endif
       /* We *could* flush to disk at this point if we do not think the next sequence
 	 will fit. This may alleviate network contention if we end up dumping the
-	 file at the start of a sequence. */
+	 file at the start of a sequence. This will only trigger if the current
+	 sequence is complete. We may need to check that the previous few are
+	 also complete if we get them in random order.
+      */
+      if ( subsys->curseq == record->rts_endnum ) {
 
+	/* will we have space for the next sequence? */
+
+      }
     }
+
+    /* reset insequence flag if this was the last sequence step in it*/
+    if (subsys->curseq == record->rts_endnum) subsys->inseq = 0;
 
 #if SPW_DEBUG_LEVEL2
     if (seqinc && *status == SAI__OK) {
