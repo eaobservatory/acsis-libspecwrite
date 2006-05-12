@@ -98,8 +98,9 @@ typedef struct subSystem {
   unsigned int curseq;  /* current RTS sequence number */
   unsigned int curpos;  /* current index position in the cube (water mark level) */
   unsigned int nchans;  /* number of spectral channels in this subsystem */
-  unsigned int inseq;   /* We are in a sequence */
+  int          inseq;   /* We are in a sequence */
   unsigned int seqlen;  /* Expected length of this sequence */
+  int          alloced; /* called allocResources no this struct? */
   specData     tdata;   /* Actual data */        
   fileInfo     file;    /* File data (can be none if file.infd == NDF__NOID) */
 } subSystem;
@@ -177,6 +178,11 @@ static void copyCache( const obsData * obsinfo, const subSystem * input,
 static size_t sizeofHDSType( const char * type, int * status );
 
 static void myRealloc( void **pntr, size_t nbytes, int * status );
+
+static int hasAllSpectra( const obsData * obsinfo, const subSystem * subsys,
+			  int * status );
+static int hasSeqSpectra( const obsData * obsinfo, const subSystem * subsys,
+			  unsigned int tindex, int * status );
 
 #if SPW_DEBUG
 static double duration ( struct timeval * tp1, struct timeval * tp2 );
@@ -318,7 +324,7 @@ static size_t hdsRecordSizes[NEXTENSIONS];
 #define PRESIZETIME 10
 #define NGROW  (MAXRATE * PRESIZETIME)
 
-/* Number of bytes we should write before opening a new file */
+/* Number of bytes we should accumulate before opening a new file */
 #define MAXBYTES ( 512 * 1024 * 1024 )
 
 /* if we have unfeasibly small spectra and 1 receptor we could get
@@ -637,7 +643,6 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
   unsigned int maxseq;         /* calculated maximum number of sequence steps allowed */
   unsigned int nperseq;        /* Number of elements per sequence */
   unsigned int inpos;          /* curpos on entry */
-  int missing = 0;             /* any spectra missing from this sequence? */
   unsigned int last_seqnum = 0; /* Sequence number encountered for previous spectrum in this slot */
 
   int found = 0;               /* Did we find the sequence? */
@@ -737,10 +742,6 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
       memset( subsys->tdata.count, 0, OBSINFO.nrecep * subsys->maxsize * sizeof(unsigned char) );
     }
 
-    /* Allocate resources for this subsystem */
-    allocResources( &OBSINFO, subsys, subsys->maxsize, status );
-
-
   } else if ( subsys->nchans != nchans ) {
     *status = SAI__ERROR;
     emsSetu( "IN", nchans );
@@ -751,6 +752,13 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
     return;
   }
 
+  /* Allocate resources for this subsystem if not currently allocated */
+  if (!subsys->alloced) {
+#if SPW_DEBUG_LEVEL2
+    printf("+++++++ Need to allocate resources on entry to WriteTS\n");
+#endif
+    allocResources( &OBSINFO, subsys, subsys->maxsize, status );
+  }
 
   /* first thing to do is determine whether this sequence number is new or old */
 
@@ -837,6 +845,9 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
     /* Calculate the length of this sequence if it is started by this
        sequence step. */
     if (!subsys->inseq) {
+#if SPW_DEBUG_LEVEL2
+      printf("+++++++++++++++++++++SEQLEN set to %u\n",reqnum);
+#endif
       subsys->seqlen = reqnum;
       subsys->inseq = 1; /* we are now in a sequence */
     }
@@ -882,11 +893,18 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 	subsys->curpos--;
 
 	/* flush what we have to disk */
+#if SPW_DEBUG_LEVEL2
+	printf("--------flush after unexpected grow\n");
+#endif
 	flushResources( &OBSINFO, subsys, status );
 
 #if USE_MEMORY_CACHE
 	/* always want to make sure we allocate the max amount of memory */
 	ngrow = subsys->maxsize;
+#endif
+
+#if SPW_DEBUG_LEVEL2
+	printf("------- alloc after unexpected grow\n");
 #endif
 	allocResources( &OBSINFO, subsys, ngrow, status );
 
@@ -985,15 +1003,8 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
     if (*status == SAI__OK) (subsys->tdata.count)[coff]++;
 
     /* see whether this sequence is complete */
-    coff = calcOffset( 1, OBSINFO.nrecep, 0, tindex, status );
-    missing = 0;
-    for (i=0; i < OBSINFO.nrecep; i++) {
-      if ( (subsys->tdata.count)[coff+i] == 0 ) {
-	missing = 1;
-	break;
-      }
-    }
-    if (!missing) {
+    if ( hasSeqSpectra( &OBSINFO, subsys, tindex, status ) ) {
+
 #if SPW_DEBUG
       printf("<<< Sequence %u (tindex=%u) completed with this spectrum for feed %u\n",
 	     subsys->curseq, tindex, record->acs_feed);
@@ -1006,8 +1017,26 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
       */
       if ( subsys->curseq == record->rts_endnum ) {
 
-	/* will we have space for the next sequence? */
+	/* Sequence complete so no longer in a sequence */
+	subsys->inseq = 0;
 
+	/* are we now complete for all sequences so far? */
+	if (hasAllSpectra( &OBSINFO, subsys, status) ) {
+
+	  /* will we have space for the next sequence? */
+	  if ( (subsys->maxsize - subsys->curpos) < subsys->seqlen ) {
+	    /* write what we have pre-emptively even if the next sequence
+	       turns out to be shorter */
+#if SPW_DEBUG
+	    printf("!!!!!!! COMPLETE SEQUENCE & FULL BUFFER <<<<<<<<\n");
+#endif
+	    flushResources( &OBSINFO, subsys, status );
+
+	    /* Do not call allocResources() since we might not get
+	       another spectrum */
+
+	  }
+	}
       }
     }
 
@@ -1157,6 +1186,9 @@ acsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
     subsys = &(SUBSYS[i]);
     if ( subsys->file.indf != NDF__NOID || subsys->tdata.spectra != NULL) {
       found = 1;
+#if SPW_DEBUG_LEVEL2
+      printf("-------- Final close flush\n");
+#endif
       flushResources( &OBSINFO, subsys, &lstat);
     }
     freeResources( &OBSINFO, subsys, &lstat );
@@ -2167,7 +2199,7 @@ calcOffset( unsigned int nchans, unsigned int maxreceps, unsigned int nrecep, un
 }
 
 
-/* Allocate resources for spectrum */
+/* Allocate resources for spectrum and initialise */
 
 static void
 allocResources( const obsData * obsinfo, subSystem * subsys, unsigned int nseq, int *status ) {
@@ -2182,8 +2214,9 @@ allocResources( const obsData * obsinfo, subSystem * subsys, unsigned int nseq, 
 
   if (*status != SAI__OK) return;
 
-#if USE_MEMORY_CACHE
   seq = ( nseq == 0 ? subsys->maxsize : nseq );
+
+#if USE_MEMORY_CACHE
 
   if (subsys->cursize != seq) {
     nbytes = seq * obsinfo->nrecep * subsys->nchans * SIZEOF_FLOAT;
@@ -2196,6 +2229,11 @@ allocResources( const obsData * obsinfo, subSystem * subsys, unsigned int nseq, 
 #else
   openNDF( obsinfo, subsys, subsys, nseq, status );
 #endif
+
+  /* count array is always in memory */
+  nbytes = obsinfo->nrecep * seq * sizeof( unsigned char );
+  myRealloc( (void**)&(subsys->tdata.count), nbytes, status );
+  if (*status == SAI__OK) memset( subsys->tdata.count, 0, nbytes );
 
   /* Record the new size */
   subsys->cursize = seq;
@@ -2213,6 +2251,9 @@ allocResources( const obsData * obsinfo, subSystem * subsys, unsigned int nseq, 
       pos += ncells;
     }
   }
+
+  /* indicate that we have been allocated */
+  subsys->alloced = 1;
 
 }
 
@@ -2236,6 +2277,9 @@ resizeResources( const obsData *obsinfo, subSystem * subsys, unsigned int newsiz
 
 }
 
+/* Write current state to file or close existing file. Does not clear
+   struct contents. */
+
 static void
 flushResources( const obsData * obsinfo, subSystem * subsys, int * status ) {
 
@@ -2251,11 +2295,11 @@ flushResources( const obsData * obsinfo, subSystem * subsys, int * status ) {
 
 #if SPW_DEBUG
   if (subsys->cursize > 0) {
-    percent = 100.0 * subsys->curpos / subsys->cursize;
+    percent = 100.0 * (double)subsys->curpos / (double)subsys->cursize;
   }
   printf("Flushing with memory cache = %u/%u (%.1f%% capacity)\n", subsys->curpos,
 	 subsys->cursize, percent);
-#endif
+#endif /* SPW_DEBUG */
 
   /* if we have no spectra we have nothing to write so do not want
      to open the NDF - should we set status? */
@@ -2279,17 +2323,16 @@ flushResources( const obsData * obsinfo, subSystem * subsys, int * status ) {
 #else
   toclose = &subsys;
 
-#endif
+#endif  /* USE_MEMORY_CACHE */
 
   closeNDF( toclose, status );
-
-  /* Reset count array */
-  if (subsys->tdata.count) 
-    memset( subsys->tdata.count, 0, obsinfo->nrecep * subsys->maxsize * sizeof(unsigned char) );
 
   /* New position in buffer is the beginning */
   subsys->curpos = 0;
   subsys->curseq = 0;
+
+  /* indicate that we need to clear this resource */
+  subsys->alloced = 0;
 
 }
 
@@ -2487,7 +2530,59 @@ static size_t sizeofHDSType( const char * type, int * status ) {
 
 }
 
+ /* See whether the "count" array has all slots filled for this time slice */
 
+static int hasSeqSpectra( const obsData * obsinfo, const subSystem * subsys,
+			  unsigned int tindex, int * status ) {
+
+  unsigned int offset; /* offset into count data array */
+  unsigned int i;    /* loop counter */
+  int missing = 0; /* true if we found a missing spectrum */
+
+  if (*status != SAI__OK) return 0;
+
+  offset = calcOffset( 1, obsinfo->nrecep, 0, tindex, status );
+
+  if (*status == SAI__OK) {
+    for (i=0; i < obsinfo->nrecep; i++) {
+      if ( (subsys->tdata.count)[offset+i] == 0 ) {
+	missing = 1;
+	break;
+      }
+    }
+  }
+
+  /* return true is missing is false */
+  return ( missing ? 0 : 1 );
+}
+
+/* See whether all spectra have been received for all sequences
+   received so far. */
+
+static int hasAllSpectra( const obsData * obsinfo, const subSystem * subsys,
+			  int * status ) {
+  unsigned int last; /* end position into count data array */
+  unsigned int i;    /* loop counter */
+  int missing = 0; /* true if we found a missing spectrum */
+
+  if (*status != SAI__OK) return 0;
+
+  /* get last valid offset in array */
+  last = calcOffset( 1, obsinfo->nrecep, obsinfo->nrecep - 1, 
+		     subsys->curpos - 1, status );
+  if (*status == SAI__OK) {
+    for (i=0; i < last; i++) {
+      if ( (subsys->tdata.count)[i] == 0 ) {
+	missing = 1;
+	break;
+      }
+    }
+  }
+
+  /* return true is missing is false */
+  return ( missing ? 0 : 1 );
+}
+			  
 
 /********************************** Debug functions ********************/
 
