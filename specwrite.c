@@ -189,6 +189,8 @@ void writeFlagFile (const obsData * obsinfo, const subSystem subsystems[],
 void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
 		      const AstFitsChan * fits[], int * status);
 
+AstFrameSet *specWcs( const AstFrameSet *fs, int ntime, const double times[], int * status );
+
 #if SPW_DEBUG
 static double duration ( struct timeval * tp1, struct timeval * tp2 );
 #endif
@@ -2558,11 +2560,16 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
   unsigned int i;           /* Loop counter */
   int          indf;        /* NDF identifier */
   unsigned int j;           /* Loop counter */
-  char * ldir = NULL;       /* subscan directory relative to rootdir */
   const subSystem * subsys = NULL; /* Current subsystem */
   int          place;       /* unused NDF placeholder */
   AstFitsChan * lfits = NULL; /* Local copy of FITS header */
   int *        oldstat;     /* Internal AST status on entry */
+  AstFrameSet *  wcs = NULL; /* World coordinates system from FITS header */
+  HDSLoc * xloc = NULL;    /* Extension locator */
+  size_t tsize;            /* number of sequence steps in file */
+  HDSLoc * tloc = NULL;    /* Locator to time data */
+  double * tdata = NULL;   /* Pointer to mapped MJD time data */
+  AstFrameSet * specwcs = NULL; /* framset for timeseries cube */
 
   if (*status != SAI__OK) return;
 
@@ -2571,6 +2578,9 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
 
   /* AST routines so register status */
   oldstat = astWatch( status );
+
+  /* Start an AST context so we do not need to annul AST pointers explicitly. */
+   astBegin;
 
   /* loop over each sub system and open each subscan */
 
@@ -2599,7 +2609,34 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
       astFindFits( lfits, FITS_NSUBSCAN, NULL, 0 );
       astSetFitsI( lfits, FITS_NSUBSCAN, j, "Sub-scan number", 1);
 
+      /* Bounds associated with this file */
+
       /* write astrometry */
+      /* Rewind the FitsChan */
+      astClear( lfits, "Card" );
+
+      /* extract astrometry from the FITS header */
+      wcs = astRead( lfits );
+
+      /* need the time information */
+      ndfXloc( indf, STATEEXT, "READ", &xloc, status );
+      datFind( xloc, "RTS_END", &tloc, status );
+      datMapV( tloc, "_DOUBLE", "READ", &tdata, &tsize, status );
+
+      /* calculate the frameset */
+      specwcs = specWcs( wcs, (int)tsize, tdata, status);
+
+      printf("Calculated spec wcs with status: %d\n", *status);
+      astShow( specwcs );
+      printf("Shown\n");
+
+      /* clean up */
+      datUnmap( tloc, status );
+      datAnnul( &tloc, status );
+      datAnnul( &xloc, status );
+
+      /* Write WCS */
+      ndfPtwcs( specwcs, indf, status );
 
       /* write FITS header */
       kpgPtfts( indf, lfits, status );
@@ -2607,8 +2644,16 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
       /* close file */
       ndfAnnul( &indf, status );
 
+      /* free the copy and other objects */
+      astAnnul( lfits );
+      astAnnul( specwcs );
     }
   }
+
+/* End the AST context. This annuls all AST Objects pointers created since
+   the matching call to astBegin, except for any which have been exempted
+   or exported. */
+   astEnd;
 
   /* Reset AST status */
   astWatch( oldstat );
@@ -2629,6 +2674,195 @@ static double duration ( struct timeval * tp1, struct timeval * tp2 ) {
   return diff;
 }
 #endif
+
+
+AstFrameSet *specWcs( const AstFrameSet *fs, int ntime, const double times[], int * status ){
+
+/*
+*+
+*  Name:
+*     specWcs
+
+*  Purpose:
+*     Calculate frameset for spectrum time series.
+
+*  Prototype:
+*     AstFrameSet *specWcs( const AstFrameSet *fs, int ntime, const double times[],
+*                int * status );
+
+*  Description:
+*     Returns a FrameSet in which the base Frame is a 3D GRID Frame, and
+*     the current Frame has 3 axes in the order (spectrum,space,time).
+*     The SpecFrame representing the spectral axis and its relationship
+*     to GRID coords is read from the supplied FITS FrameSet. The time
+*     axis is described using a MJD(TAI) TimeFrame, and its relationship
+*     to GRID coords is specified by the supplied look-up table of time
+*     values. The spatial axis is described by a simple 1D Frame with
+*     Domain "SPACEINDEX" and is connected to the GRID coords via a
+*     UnitMap.
+
+*  Parameters:
+*     fs = const AstFrameSet * (Given)
+*        A pointer to the FrameSet read from the unmodified FITS headers
+*        which define the spectral axis.
+*     ntime = int (Given)
+*        The number of time values supplied in "times".
+*     times = const double [] (Given)
+*        An array of "ntime" MJD values (in the TAI timescale), one for
+*        each pixel along the time axis.
+*     status = int * (Given & Returned)
+*        Inherited status.
+
+*  Returned Value:
+*     specWcs = AstFrameSet *
+*        3-D frameset.
+
+*  Notes:
+*     - The SpecFrame does not use the times in the time dimension
+
+*  Authors:
+*     DSB: David Berry (UCLan)
+
+*  History:
+*     10-MAR-2006 (DSB):
+*        Initial version (untested)
+
+*-
+*/
+
+/* Local Variables: */
+   AstCmpFrame *totfrm;
+   AstCmpMap *totmap;
+   AstFrame *axis, *specfrm, *spacefrm, *gridfrm;
+   AstFrameSet *result;
+   AstLutMap *timemap;
+   AstMapping *specmap;
+   AstTimeFrame *timefrm;
+   AstUnitMap *spacemap;
+   int nax, iax, iax_spec, ax_out[ NDF__MXDIM ];
+
+/* Initialise. */
+   result = NULL;
+
+/* Check the global error status. */
+   if( *status != SAI__OK ) return result;
+
+/* Start an AST context so we do not need to annul AST pointers explicitly. */
+   astBegin;
+
+/* Check each axis of the current Frame in the FrameSet read from
+   the FITS headers, looking for a spectral axis. We do this using
+   astIsASpecFrame since this will pick up both SpecFrames and DSBSpecFrames
+   (since a DSBSpecFrame "is a" SpecFrame). */
+   specfrm = NULL;
+   nax = astGetI( fs, "Naxes" );
+   for( iax = 1; iax <= nax; iax++ ) {
+      axis = astPickAxes( fs, 1, &iax, NULL );
+      if( astIsASpecFrame( axis ) ) {
+         specfrm = axis;
+         iax_spec = iax;
+         break;
+      }
+   }
+
+/* Report an error if no spectral axis was found in the FITS header. */
+   if( !specfrm ) {
+      if( *status == SAI__OK ) {
+         *status = SAI__ERROR;
+         emsRep( "", "No spectral axis found in FITS header", status );
+         goto L999;
+      }
+   }
+
+/* We now assume that the spectral axis is connected to one and only one
+   of the grid axes in the FITS header. We use astMapSplit to determine
+   which grid axis this is, and to get the Mapping from the grid axis
+   to the SpecFrame axis. We first invert the FrameSet (i.e. swap base
+   and current Frames) since astMapSplit picks specified *inputs", but
+   the SpecFrame is an "output" of the Mapping represented by the FrameSet.
+   After inversion of the FrameSet, the SpecFrame will be one of the
+   inputs, and can therefore be picked by astMapSplit. */
+   astInvert( fs );
+   astMapSplit( fs, 1, &iax_spec, ax_out, &specmap );
+
+/* Invert the FrameSet again to return it to its original state */
+   astInvert( fs );
+
+/* Report an error if the assumption made above turned out not to be
+   right. */
+   if( !specmap ){
+      if( *status == SAI__OK ) {
+         *status = SAI__ERROR;
+         emsRep( "", "The spectral axis depends on more than one pixel axis",
+                 status );
+         goto L999;
+      }
+   }
+
+/* Invert "specmap" so that the forward transformation goes from grid
+   coord to spectral coord. */
+   astInvert( specmap );
+
+/* We will use a simple Frame to describe the spatial axis, giving it the
+   Domain name SPACEINDEX in order to distinguish it from the GRID Frame.
+   The values on the spatial axis are just copies fo the grid coordinate,
+   so create a UnitMap to connect the GRID Frame to the SPACEINDEX Frame. */
+   spacefrm = astFrame( 1, "Domain=SPACEINDEX,Unit(1)=pixel,Label(1)=Receptor Number" );
+   spacemap = astUnitMap( 1, "" );
+
+/* We now have the SpecFrame, and the Mapping from grid coord to spectral
+   coord. Now create a TimeFrame to describe MJD in the TAI timescale, and
+   a LutMap which transforms grid coord into MJD (in days). The default
+   TimeFrame attribute values give us what we want. */
+   timefrm = astTimeFrame( "" );
+   timemap = astLutMap( ntime, times, 1.0, 1.0, "" );
+
+/* We now have the Frames and Mappings describing all the individual
+   axes. Join all the Frames together into a CmpFrame (in the order spectral,
+   spatial, time), and join all the Mappings together into a parallel
+   CmpMap. */
+   totfrm = astCmpFrame( astCmpFrame( specfrm, spacefrm, "" ), timefrm, "" );
+   totmap = astCmpMap( astCmpMap( specmap, spacemap, 0, "" ), timemap, 0, "" );
+
+/* Create a 3D GRID Frame. */
+   gridfrm = astFrame( 3, "Domain=GRID,Title=FITS pixel coordinates" );
+   astSet( gridfrm, "Unit(1)=pixel,Label(1)=FITS pixel axis 1" );
+   astSet( gridfrm, "Unit(2)=pixel,Label(2)=FITS pixel axis 2" );
+   astSet( gridfrm, "Unit(3)=pixel,Label(2)=FITS pixel axis 3" );
+
+/* Create the FrameSet to return, initially containing just the above
+   GRID Frame. */
+   result = astFrameSet( gridfrm, "" );
+
+/* Add the total Frame into the FrameSet using the total Mapping to
+   connect it to the base (i.e. GRID) Frame. */
+   astAddFrame( result, AST__BASE, totmap, totfrm );
+
+/* Arrive here if an error occurs. Note, this is still inside the AST context
+   delimited by astBegin/astEnd. */
+L999:
+
+/* If no error has occurred, export the resulting FrameSet pointer
+   from the current AST context so that it will not be annulled by the
+   following call to astEnd. If an error has occurred, annul it explicitly,
+   in order to ensure we are returning a NULL pointer. */
+   if( *status == SAI__OK ) {
+      astExport( result );
+   } else {
+      result = astAnnul( result );
+   }
+
+/* End the AST context. This annuls all AST Objects pointers created since
+   the matching call to astBegin, except for any which have been exempted
+   or exported. */
+   astEnd;
+
+/* Return the resulting FrameSet. */
+   return result;
+
+}
+
+
 
 /******************** kpgPtfts ***********************/
 
