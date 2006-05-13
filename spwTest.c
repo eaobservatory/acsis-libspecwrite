@@ -190,7 +190,7 @@ main ( void ) {
       for (j = 0; j < nsubsys; j++) {
 	gettimeofday(&tp1, NULL);
 	c++;
-	acsSpecWriteTS(j, nchans[j], spectrum2, &record, NULL, &status);
+	acsSpecWriteTS(j, nchans[j], spectrum2, &record, &status);
 	gettimeofday(&tp2, NULL);
 	diff = duration( &tp1, &tp2, &status);
 	if ( diff > 0.5 ) {
@@ -202,7 +202,7 @@ main ( void ) {
     }
   }
   gettimeofday(&tp1, NULL);
-  acsSpecCloseTS( fits, &status );
+  acsSpecCloseTS( fits, 0, &status );
   gettimeofday(&tp2, NULL);
   diff = duration( &tp1, &tp2, &status );
   printf("Time to close file = %.3f seconds\n", diff);

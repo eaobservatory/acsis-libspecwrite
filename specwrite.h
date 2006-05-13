@@ -135,12 +135,12 @@ void acsSpecWriteTS( unsigned int subsys,
 		     unsigned int nchans,
 		     const float spectrum[],
 		     const ACSISRtsState * state,
-		     const AstFitsChan * freq,
 		     int * status );
 
 /* Close the file */
 void acsSpecCloseTS( const AstFitsChan * fits[],
-		   int * status );
+		     int incArchiveBounds,
+		     int * status );
 
 
 

@@ -16,6 +16,7 @@
 /* Starlink includes */
 #include "sae_par.h"
 #include "star/hds.h"
+#include "star/kaplibs.h"
 #include "ndf.h"
 #include "ast.h"
 #include "ems.h"
@@ -115,7 +116,6 @@ unsigned int INPROGRESS = 0; /* true if an observation is in progress */
 unsigned int CALLED = 0;     /* has openTS been called at least once */
 
 /* internal prototypes */
-static void writeFitsChan( int indf, const AstFitsChan * fitschan, int * status );
 static char * getFileName( const char * dir, unsigned int yyyymmdd, unsigned int subsys,
 			   unsigned int obsnum, unsigned int subscan, int * status );
 static char * getOkFileName( const char * dir, unsigned int yyyymmdd,
@@ -183,6 +183,12 @@ static int hasAllSpectra( const obsData * obsinfo, const subSystem * subsys,
 			  int * status );
 static int hasSeqSpectra( const obsData * obsinfo, const subSystem * subsys,
 			  unsigned int tindex, int * status );
+
+void writeFlagFile (const obsData * obsinfo, const subSystem subsystems[],
+		    int * status);
+
+void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
+		      const AstFitsChan * fits[], int * status);
 
 #if SPW_DEBUG
 static double duration ( struct timeval * tp1, struct timeval * tp2 );
@@ -555,7 +561,7 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 
 *  Invocation:
 *     acsSpecWriteTS( unsigned int subsys, unsigned int nchans, const float spectrum[], 
-*                     const ACSISRtsState * record, const AstFitsChan * freq,
+*                     const ACSISRtsState * record,
 *                     int *status);
 
 *  Language:
@@ -576,13 +582,6 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 *        Spectrum itself.
 *     record = const ACSISRtsState * (Given)
 *        Header information associated with this spectrum.
-*     freq = const AstFitsChan * (Given)
-*        Spectral coordinate information for this subsystem.
-*        If non-NULL, the spectral information is extracted
-*        and stored internally for this subsystem. Should be
-*        supplied with the first spectrum from each subsystem.
-*        Subsequent calls can pass in NULL and the cached
-*        world coordinates will be used.
 *     status = int * (Given & Returned)
 *        Inherited status.
 
@@ -599,6 +598,8 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 *     09-MAY-2006 (TIMJ):
 *        Keep track of all spectra arriving so we can determine
 *        when all spectra for a sequence have arrived.
+*     11-MAY-2006 (TIMJ):
+*        Remove Freq argument.
 
 *  Notes:
 *     - Must have previously called acsSpecOpenTS.
@@ -629,7 +630,7 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 void
 acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectrum[], 
 		const ACSISRtsState* record,
-		const AstFitsChan * freq, int * status ) {
+	        int * status ) {
 
   float * data; /* local copy of mapped pointer to spectrum */
   unsigned int offset;         /* offset into data array */
@@ -1083,7 +1084,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 *     Write FITS header and close HDS file.
 
 *  Invocation:
-*     acsSpecCloseTS( const AstFitsChan * fits[], int *status );
+*     acsSpecCloseTS( const AstFitsChan * fits[], int incArchiveBounds, int *status );
 
 *  Language:
 *     Starlink ANSI C
@@ -1095,6 +1096,8 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 *  Arguments:
 *     fits[] = const AstFitsChan * (Given)
 *        Array of FITS headers. One per subsystem.
+*     incArchiveBounds = int (Given)
+*        If true, bounds FITS keywords will be calculated.
 *     status = int * (Given & Returned)
 *        Inherited status.
 
@@ -1108,6 +1111,8 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 *        Use structured globals.
 *     09-MAY-2006 (TIMJ):
 *        Attempt to run even if status is bad on entry.
+*     11-MAY-2006 (TIMJ):
+*        Add flag for adding archive bounds to FITS header.
 
 *  Notes:
 *     - Must have previously called acsSpecOpenTS.
@@ -1140,20 +1145,11 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 */
 
 void
-acsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
+acsSpecCloseTS( const AstFitsChan * fits[], int incArchiveBounds, int * status ) {
 
-  int fd;                   /* file descriptor of temp ok file */
-  FILE * fstream = NULL;    /* Stream associated with temp ok file */
-  char * fname;             /* file name of a given subscan */
-  int flen;                 /* length of return value from snprintf */
   unsigned int i;           /* Loop counter */
-  unsigned int j;           /* Loop counter */
-  char * ldir = NULL;       /* subscan directory relative to rootdir */
   int found = 0;            /* Found an open NDF? */
   subSystem * subsys;       /* specific subsystem */
-  char tmpok[MAXFILE];      /* temporary file name */
-  char *okfile;             /* name of ok file */
-  int sysstat;              /* system status return */
   int lstat = SAI__OK;      /* Local status */
 
   /* Ideally should not automatically abort on entry since we may be required
@@ -1201,95 +1197,14 @@ acsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
   }
 
   /* Now need to open all the files that we have opened previously and adjust
-     all the FITS headers. This is going to be problematic for the ones that
-     are related to sequence values since this code does not have the HEADER_CONFIG.
+     any FITS headers.
   */
 
-  /* Now need to write out the .ok file with all the files that we have opened.
-     We must first write to a temporary file so that we can rename it when it
-     is complete.
-  */
-  if ( lstat == SAI__OK ) {
-    flen = snprintf(tmpok, MAXFILE,
-#if HAVE_MKSTEMPS
-		    "%s/tempXXXXXX.ok",
-#elif HAVE_MKSTEMP
-		    "%s/tempXXXXXX",
-#endif
-		    OBSINFO.rootdir );
-    if (flen >= MAXFILE && lstat == SAI__OK) {
-      lstat = SAI__ERROR;
-      emsRep(" ","Error forming temporary 'ok' filename. Exceeded buffer",
-	     &lstat );
-    }
-    /* get a temporary file */
-    if (lstat == SAI__OK) {
-#if HAVE_MKSTEMPS
-      fd = mkstemps( tmpok, 3 ); /* .ok is 3 characters */
-#elif HAVE_MKSTEMP
-      fd = mkstemp( tmpok );
-#else
-      UNABLE TO CREATE A TEMPORARY FILE
-#endif
-      if (fd == -1) {
-	lstat = SAI__ERROR;
-	emsSyser( "ERRNO", errno );
-	emsSetc( "DIR", OBSINFO.rootdir );
-	emsSetc( "TMP", tmpok );
-	emsRep(" ","acsSpecCloseTS: Failed to open temporary 'ok' file ^TMP in dir ^DIR:"
-	       " ^ERRNO", &lstat );
-      }
-    }
-    /* use stream I/O so open this on a stream */
-    if (lstat == SAI__OK) {
-      fstream = fdopen( fd, "w+" );
-      if (!fstream) {
-	lstat = SAI__ERROR;
-	emsSyser( "ERRNO", errno );
-	emsRep(" ","acsSpecCloseTS: Failed to open stream on 'ok' file descriptor:"
-	       " ^ERRNO", &lstat);
-      }
-    }
-  }
+  writeWCSandFITS( &OBSINFO, SUBSYS, fits, &lstat );
 
-  /* for each subsystem, for each subscan, write a FITS header and entry in ok
-     file */
-  if (lstat == SAI__OK) {
+  /* Write the flag file contents */
 
-    for (i = 0; i < OBSINFO.nsubsys; i++) {
-      /* local subsystem */
-      subsys = &(SUBSYS[i]);
-
-      /* subscans start counting at 1 */
-      for (j = 1; j <= subsys->file.subscan ; j++ ) {
-	/* contents of okay file are relative to data dir but should
-	   not include datadir itself */
-	ldir = getDirName( NULL, OBSINFO.yyyymmdd, OBSINFO.obsnum, &lstat );
-	fname = getFileName( ldir, OBSINFO.yyyymmdd, i,
-			     OBSINFO.obsnum, j, &lstat );
-	fprintf( fstream, "%s\n", fname );
-      }
-
-    }
-  }
-
-
-  /* rename temp file to okfile and close temp file */
-  okfile = getOkFileName( OBSINFO.rootdir, OBSINFO.yyyymmdd,
-			  OBSINFO.obsnum, &lstat );
-  if (lstat == SAI__OK) {
-    sysstat = rename(tmpok, okfile);
-    if (sysstat == -1) {
-	lstat = SAI__ERROR;
-	emsSyser( "ERRNO", errno );
-	emsSetc( "F", tmpok);
-	emsSetc( "T", okfile );
-	emsRep(" ","acsSpecCloseTS: Error renaming okay file from '^F'"
-	       " to ^T: ^ERRNO", &lstat);
-    }
-    /* close temporary file descriptor and stream */
-    fclose( fstream ); /* also closes fd */
-  }
+  writeFlagFile( &OBSINFO, SUBSYS, &lstat);
 
   /* Force globals to be reset */
   for (i = 0; i < maxsubsys; i++) {
@@ -1317,65 +1232,6 @@ acsSpecCloseTS( const AstFitsChan * fits[], int * status ) {
 }
 
 /*********************** HELPER FUNCTIONS (PRIVATE) *****************************/
-
-/* Internal function to write a FitsChan to an NDF - taken from
-   kpgPtfts */
-
-static void writeFitsChan( int indf, const AstFitsChan * fits, int * status ) {
-
-  char card[81];            /* A single FITS header card */
-  HDSLoc * fitsloc = NULL;  /* Locator to FITS extension */
-  char * fpntr;             /* Pointer to mapped FITS header */
-  unsigned int i;           /* Loop counter */
-  unsigned int ncards;      /* Number of header cards */
-  size_t nchars;            /* Actual size of FITS extension */
-  int result;               /* Result from astFindFits */
-  int extdims[1];
-
-  if (*status != SAI__OK) return;
-
-  /* Find out how many header cards we have */
-  ncards = astGetI( fits, "Ncard" );
-
-  /* Rewind the FitsChan */
-  astClear( fits, "Card" );
-    
-  /* Create FITS extension */
-  extdims[0] = ncards;
-  ndfXnew(indf, "FITS", "_CHAR*80", 1, extdims, &fitsloc, status );
-
-  /* Loop over all cards, inserting into extension */
-  datMapV( fitsloc, "_CHAR*80", "WRITE", (void**)&fpntr, &nchars, status );
-
-  if (*status == SAI__OK) {
-    if ( ncards != nchars ) {
-      *status = SAI__ERROR;
-      emsSetu( "DM", nchars );
-      emsSetu( "SZ",  ncards );
-      emsRep("HDS_SPEC_CLOSE_ERR2",
-	     "Bizarre error whereby number of cards in mapped FITS header (^DM) differs from number requested (^SZ)", status );
-    }
-  }
-
-  if (*status == SAI__OK) {
-    for (i = 1; i <= ncards; i++) {
-      result = astFindFits( fits, "%f", card, 1 );
-      if (result) {
-	strncpy( fpntr, card, 80 );
-	fpntr += 80;
-      } else {
-	break;
-      }
-    }
-  }
-
-  /* Cleanup */
-  datUnmap( fitsloc, status );
-  datAnnul( &fitsloc, status );
-
-  if (*status != SAI__OK)
-    emsRep(" ", "Error writing FITS information.", status );
-}
 
 /* Form the file name
    - returns a pointer to static memory.
@@ -2583,6 +2439,164 @@ static int hasAllSpectra( const obsData * obsinfo, const subSystem * subsys,
   return ( missing ? 0 : 1 );
 }
 			  
+/* Write the OK flag file and content */
+
+void writeFlagFile (const obsData * obsinfo, const subSystem subsystems[],
+		    int * status) {
+
+  int fd;                   /* file descriptor of temp ok file */
+  FILE * fstream = NULL;    /* Stream associated with temp ok file */
+  char * fname;             /* file name of a given subscan */
+  int flen;                 /* length of return value from snprintf */
+  unsigned int i;           /* Loop counter */
+  unsigned int j;           /* Loop counter */
+  char * ldir = NULL;       /* subscan directory relative to rootdir */
+  char tmpok[MAXFILE];      /* temporary file name */
+  char *okfile;             /* name of ok file */
+  int sysstat;              /* system status return */
+  const subSystem * subsys;       /* specific subsystem */
+
+  if (*status != SAI__OK) return;
+
+  /* We must first write to a temporary file so that we can rename it when it
+     is complete. */
+
+  flen = snprintf(tmpok, MAXFILE,
+#if HAVE_MKSTEMPS
+		  "%s/tempXXXXXX.ok",
+#elif HAVE_MKSTEMP
+		  "%s/tempXXXXXX",
+#endif
+		  obsinfo->rootdir );
+  if (flen >= MAXFILE && status == SAI__OK) {
+    *status = SAI__ERROR;
+    emsRep(" ","Error forming temporary 'ok' filename. Exceeded buffer",
+	   status );
+  }
+
+  /* get a temporary file */
+  if (*status == SAI__OK) {
+#if HAVE_MKSTEMPS
+    fd = mkstemps( tmpok, 3 ); /* .ok is 3 characters */
+#elif HAVE_MKSTEMP
+    fd = mkstemp( tmpok );
+#else
+    UNABLE TO CREATE A TEMPORARY FILE
+#endif
+    if (fd == -1) {
+      *status = SAI__ERROR;
+      emsSyser( "ERRNO", errno );
+      emsSetc( "DIR", obsinfo->rootdir );
+      emsSetc( "TMP", tmpok );
+      emsRep(" ","acsSpecCloseTS: Failed to open temporary 'ok' file ^TMP in dir ^DIR:"
+	     " ^ERRNO", status );
+    }
+  }
+
+  /* use stream I/O so open this on a stream */
+  if (*status == SAI__OK) {
+    fstream = fdopen( fd, "w+" );
+    if (!fstream) {
+      *status = SAI__ERROR;
+      emsSyser( "ERRNO", errno );
+      emsRep(" ","acsSpecCloseTS: Failed to open stream on 'ok' file descriptor:"
+	     " ^ERRNO", status);
+    }
+  }
+
+  /* for each subsystem, for each subscan, write a FITS header and entry in ok
+     file */
+  if (*status == SAI__OK) {
+
+    for (i = 0; i < obsinfo->nsubsys; i++) {
+      /* local subsystem */
+      subsys = &(subsystems[i]);
+
+      /* subscans start counting at 1 */
+      for (j = 1; j <= subsys->file.subscan ; j++ ) {
+	/* contents of okay file are relative to data dir but should
+	   not include datadir itself */
+	ldir = getDirName( NULL, obsinfo->yyyymmdd, obsinfo->obsnum, status );
+	fname = getFileName( ldir, obsinfo->yyyymmdd, i,
+			     obsinfo->obsnum, j, status );
+	fprintf( fstream, "%s\n", fname );
+      }
+
+    }
+  }
+
+  /* rename temp file to okfile and close temp file */
+  okfile = getOkFileName( obsinfo->rootdir, obsinfo->yyyymmdd,
+			  obsinfo->obsnum, status );
+  if (*status == SAI__OK) {
+    sysstat = rename(tmpok, okfile);
+    if (sysstat == -1) {
+	*status = SAI__ERROR;
+	emsSyser( "ERRNO", errno );
+	emsSetc( "F", tmpok);
+	emsSetc( "T", okfile );
+	emsRep(" ","acsSpecCloseTS: Error renaming okay file from '^F'"
+	       " to ^T: ^ERRNO", status);
+    }
+  }
+  /* close temporary file descriptor and stream (even if bad status) */
+  if (fstream) fclose( fstream ); /* also closes fd */
+
+  return;
+}
+
+void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
+		      const AstFitsChan * fits[], int * status) {
+
+  char * fname;             /* file name of a given subscan */
+  unsigned int i;           /* Loop counter */
+  int          indf;        /* NDF identifier */
+  unsigned int j;           /* Loop counter */
+  char * ldir = NULL;       /* subscan directory relative to rootdir */
+  subSystem * subsys = NULL; /* Current subsystem */
+  int          place;       /* unused NDF placeholder */
+
+  if (*status != SAI__OK) return;
+
+  /* do nothing if we have null pointer */
+  if (fits == NULL) return;
+
+  /* loop over each sub system and open each subscan */
+
+  /* repeat code in flag file function rather than have a separate
+     routine that populates an array of strings (or even store those
+     filenames in the subsys struct itself). This is just laziness */
+
+  for (i = 0; i < obsinfo->nsubsys; i++) {
+    /* local subsystem */
+    subsys = &(subsystems[i]);
+
+    /* subscans start counting at 1 */
+    for (j = 1; j <= subsys->file.subscan ; j++ ) {
+      /* contents of okay file are relative to data dir but should
+	 not include datadir itself */
+      ldir = getDirName( NULL, obsinfo->yyyymmdd, obsinfo->obsnum, status );
+      fname = getFileName( ldir, obsinfo->yyyymmdd, i,
+			   obsinfo->obsnum, j, status );
+
+      /* open the NDF */
+      printf("Writing file FITS header %s\n", fname );
+      ndfOpen( NULL, fname, "UPDATE", "OLD", &indf, &place, status );
+
+      /* manipulate FITS header here... */
+
+      /* write astrometry */
+
+      /* write FITS header */
+      kpgPtfts( indf, fits[i], status );
+
+      /* close file */
+      ndfAnnul( &indf, status );
+
+    }
+  }
+  return;
+}
 
 /********************************** Debug functions ********************/
 
