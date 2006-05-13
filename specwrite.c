@@ -321,6 +321,10 @@ static size_t hdsRecordSizes[NEXTENSIONS];
 #define ACSISEXT   "ACSIS"
 #define ACSISEXTTYP "ACSIS_COMP"
 
+/* Name of the FITS header containing the subscan information. This header is the
+   only mandatory header. */
+#define FITS_NSUBSCAN "NSUBSCAN"
+
 /*********************** NDF "cube" FILE *************************************/
 
 /* Number of sequences to increment file size by if it runs out of space */
@@ -2557,11 +2561,16 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
   char * ldir = NULL;       /* subscan directory relative to rootdir */
   const subSystem * subsys = NULL; /* Current subsystem */
   int          place;       /* unused NDF placeholder */
+  AstFitsChan * lfits = NULL; /* Local copy of FITS header */
+  int *        oldstat;     /* Internal AST status on entry */
 
   if (*status != SAI__OK) return;
 
   /* do nothing if we have null pointer */
   if (fits == NULL) return;
+
+  /* AST routines so register status */
+  oldstat = astWatch( status );
 
   /* loop over each sub system and open each subscan */
 
@@ -2575,28 +2584,35 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
 
     /* subscans start counting at 1 */
     for (j = 1; j <= subsys->file.subscan ; j++ ) {
-      /* contents of okay file are relative to data dir but should
-	 not include datadir itself */
-      ldir = getDirName( NULL, obsinfo->yyyymmdd, obsinfo->obsnum, status );
-      fname = getFileName( ldir, obsinfo->yyyymmdd, i,
+      /* need full path of file */
+      fname = getFileName( obsinfo->datadir, obsinfo->yyyymmdd, i,
 			   obsinfo->obsnum, j, status );
 
       /* open the NDF */
       printf("Writing file FITS header %s\n", fname );
       ndfOpen( NULL, fname, "UPDATE", "OLD", &indf, &place, status );
 
-      /* manipulate FITS header here... */
+      /* manipulate FITS header here...First take a copy. */
+      lfits = astCopy( fits[i] );
+
+      /* need to add a SUBSCAN number to the header */
+      astFindFits( lfits, FITS_NSUBSCAN, NULL, 0 );
+      astSetFitsI( lfits, FITS_NSUBSCAN, j, "Sub-scan number", 1);
 
       /* write astrometry */
 
       /* write FITS header */
-      kpgPtfts( indf, fits[i], status );
+      kpgPtfts( indf, lfits, status );
 
       /* close file */
       ndfAnnul( &indf, status );
 
     }
   }
+
+  /* Reset AST status */
+  astWatch( oldstat );
+
   return;
 }
 
