@@ -2626,10 +2626,6 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
       /* calculate the frameset */
       specwcs = specWcs( wcs, (int)tsize, tdata, status);
 
-      printf("Calculated spec wcs with status: %d\n", *status);
-      astShow( specwcs );
-      printf("Shown\n");
-
       /* clean up */
       datUnmap( tloc, status );
       datAnnul( &tloc, status );
