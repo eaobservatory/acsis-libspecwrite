@@ -2501,6 +2501,17 @@ void writeFlagFile (const obsData * obsinfo, const subSystem subsystems[],
     }
   }
 
+  /* Force permissions on the temp file so that the pipeline can read it */
+  if (*status == SAI__OK) {
+    sysstat = fchmod(fd, S_IRUSR|S_IRGRP|S_IROTH);
+    if (sysstat == -1) {
+	*status = SAI__ERROR;
+	emsSyser( "ERRNO", errno );
+	emsRep(" ","acsSpecCloseTS: Error setting permissions on 'ok' file: ^ERRNO",
+	       status );
+    }
+  }
+
   /* use stream I/O so open this on a stream */
   if (*status == SAI__OK) {
     fstream = fdopen( fd, "w+" );
@@ -2570,6 +2581,7 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
   HDSLoc * tloc = NULL;    /* Locator to time data */
   double * tdata = NULL;   /* Pointer to mapped MJD time data */
   AstFrameSet * specwcs = NULL; /* framset for timeseries cube */
+  int sysstat;             /* status from system call */
 
   if (*status != SAI__OK) return;
 
@@ -2643,6 +2655,20 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
       /* free the copy and other objects */
       astAnnul( lfits );
       astAnnul( specwcs );
+
+      /* we may want to set permissions on the file to stop unwary people overwriting it
+	 or even the acquisition system itself. */
+      if (*status == SAI__OK) {
+	sysstat = chmod( fname, S_IRUSR | S_IRGRP | S_IROTH );
+	if (sysstat == -1) {
+	  *status = SAI__ERROR;
+	  emsSyser( "ERRNO", errno );
+	  emsSetc( "FILE", fname );
+	  emsRep(" ","acsSpecCloseTS: Error setting permissions on file ^FILE: ^ERRNO",
+		 status );
+	}
+      }
+
     }
   }
 
