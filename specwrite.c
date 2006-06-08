@@ -2580,7 +2580,9 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
   size_t tsize;            /* number of sequence steps in file */
   HDSLoc * tloc = NULL;    /* Locator to time data */
   double * tdata = NULL;   /* Pointer to mapped MJD time data */
+  int      tempscal = 0;   /* temperature scale? */
   AstFrameSet * specwcs = NULL; /* framset for timeseries cube */
+  char * stemp = NULL;     /* temporary pointer to string */
   int sysstat;             /* status from system call */
 
   if (*status != SAI__OK) return;
@@ -2620,6 +2622,27 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
       /* need to add a SUBSCAN number to the header */
       astFindFits( lfits, FITS_NSUBSCAN, NULL, 0 );
       astSetFitsI( lfits, FITS_NSUBSCAN, j, "Sub-scan number", 1);
+
+      /* Need to look for the BUNIT header */
+      astClear( lfits, "Card");
+      tempscal = 0;
+      if ( astGetFitsS( lfits, "BUNIT", &stemp ) ) {
+	ndfCput( stemp, indf, "UNITS", status );
+	if (strncmp("K", stemp,1) == 0) tempscal = 1;
+	astDelFits( lfits );
+      } else {
+	/* not calibrated */
+	ndfCput( "uncalibrated", indf, "UNITS", status );
+      }
+
+      /* attach a data label */
+      if (tempscal) {
+	/* Note the use of AST control codes for subscript/superscript */
+	ndfCput( "T%s60+%v30+A%^50+%<20+*%+   corrected antenna temperature", indf, "LABEL", status );
+      } else {
+	ndfCput( "Power", indf, "LABEL", status );
+      }
+      
 
       /* Bounds associated with this file */
 
