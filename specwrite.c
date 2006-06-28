@@ -26,6 +26,9 @@
 /* Local includes */
 #include "specwrite.h"
 
+/* Application name for history writing */
+#define APPNAME "ACSIS-DA (V" PACKAGE_VERSION ")"
+
 /* Enable memory cache */
 #define USE_MEMORY_CACHE 1
 
@@ -1441,8 +1444,7 @@ openNDF( const obsData * obsinfo, const subSystem * template, subSystem * file,
   unsigned int ngrow;          /* Initial size to grow array */
   int place;                   /* NDF placeholder */
   int ubnd[NDIMS];             /* upper pixel bounds */
-  char * history[1] = { "ACSIS Data Acquistion" };
-
+  char * history[1] = { "Initial writing of raw data." };
 
   if (*status != SAI__OK) return;
 
@@ -1493,9 +1495,8 @@ openNDF( const obsData * obsinfo, const subSystem * template, subSystem * file,
 
   /* History component */
   ndfHcre( file->file.indf, status );
-  ndfHput("NORMAL","ACSIS-DA (V" PACKAGE_VERSION ")", 1, 1, history,
+  ndfHput("NORMAL",APPNAME, 1, 1, history,
 	  0, 0, 0, file->file.indf, status );
-  ndfHsmod( "DISABLED", file->file.indf, status );
 
   /* Map the data array */
   ndfMap(file->file.indf, "DATA", "_REAL", "WRITE", datapntrs, &itemp, status );
@@ -2584,6 +2585,7 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
   AstFrameSet * specwcs = NULL; /* framset for timeseries cube */
   char * stemp = NULL;     /* temporary pointer to string */
   int sysstat;             /* status from system call */
+  char * history[1] = { "Finalise headers and make ICD compliant." };
 
   if (*status != SAI__OK) return;
 
@@ -2671,6 +2673,12 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
 
       /* write FITS header */
       kpgPtfts( indf, lfits, status );
+
+      /* easiest to write a second piece of history information for header collation.
+	 Stops having to worry about only getting a single HISTORY entry when NDF
+	 wants to write a new entry every time the file is opened for UPDATE. */
+      ndfHput("NORMAL",APPNAME, 1, 1, history,
+	      0, 0, 0, indf, status );
 
       /* close file */
       ndfAnnul( &indf, status );
@@ -2784,6 +2792,8 @@ AstFrameSet *specWcs( const AstFrameSet *fs, int ntime, const double times[], in
    AstMapping *specmap;
    AstTimeFrame *timefrm;
    AstUnitMap *spacemap;
+   double tcopy[2];  /* local copy of time lut for when only 1 number present */
+   double *ltimes;  /* pointer to a time array */
    int nax, iax, iax_spec, ax_out[ NDF__MXDIM ];
 
 /* Initialise. */
@@ -2860,7 +2870,17 @@ AstFrameSet *specWcs( const AstFrameSet *fs, int ntime, const double times[], in
    a LutMap which transforms grid coord into MJD (in days). The default
    TimeFrame attribute values give us what we want. */
    timefrm = astTimeFrame( "" );
-   timemap = astLutMap( ntime, times, 1.0, 1.0, "" );
+   if (ntime == 1) {
+     /* a LutMap needs to numbers in its mapping so double up the
+	first time if we only have one value. */
+     tcopy[0] = times[0];
+     tcopy[1] = times[1];
+     ltimes = tcopy;
+     ntime = 2;
+   } else {
+     ltimes = times;
+   }
+   timemap = astLutMap( ntime, ltimes, 1.0, 1.0, "" );
 
 /* We now have the Frames and Mappings describing all the individual
    axes. Join all the Frames together into a CmpFrame (in the order spectral,
