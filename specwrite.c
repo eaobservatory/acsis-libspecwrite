@@ -2775,10 +2775,13 @@ AstFrameSet *specWcs( const AstFrameSet *fs, int ntime, const double times[], in
 
 *  Authors:
 *     DSB: David Berry (UCLan)
+*     TIMJ: Tim Jenness (JAC, Hawaii)
 
 *  History:
 *     10-MAR-2006 (DSB):
 *        Initial version (untested)
+*     01-JUN-2006 (TIMJ):
+*        Integrated into specwriter.
 
 *-
 */
@@ -2868,7 +2871,10 @@ AstFrameSet *specWcs( const AstFrameSet *fs, int ntime, const double times[], in
 /* We now have the SpecFrame, and the Mapping from grid coord to spectral
    coord. Now create a TimeFrame to describe MJD in the TAI timescale, and
    a LutMap which transforms grid coord into MJD (in days). The default
-   TimeFrame attribute values give us what we want. */
+   TimeFrame attribute values give us what we want. Although we 
+   can set the formatting to 2 decimal places (seconds) since we know that
+   ACSIS will never read out faster than 50 ms.
+*/
    timefrm = astTimeFrame( "" );
    if (ntime == 1) {
      /* a LutMap needs to numbers in its mapping so double up the
