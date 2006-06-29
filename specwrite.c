@@ -2645,7 +2645,12 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
   AstFrameSet * specwcs = NULL; /* framset for timeseries cube */
   char * stemp = NULL;     /* temporary pointer to string */
   int sysstat;             /* status from system call */
-  char * history[1] = { "Finalise headers and make ICD compliant." };
+  const char * history[1] = { "Finalise headers and make ICD compliant." };
+
+  /* headers to be retained */
+  char * retainfits[] = {
+    "DATE-OBS", "OBSGEO-X", "OBSGEO-Y", "OBSGEO-Z", "SSYSOBS", NULL
+  };
 
   if (*status != SAI__OK) return;
 
@@ -2714,6 +2719,17 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
       
 
       /* Bounds associated with this file */
+
+      /* Mark some headers to be retained after stripping */
+      i = 0;
+      while ( retainfits[i] != NULL ) {
+	/* clearing each time is not very efficient but I don't want
+	   to burn in the ordering */
+	astClear( lfits, "Card" );
+	astFindFits( lfits, retainfits[i], NULL, 0 );
+	astRetainFits( lfits );
+	i++;
+      }
 
       /* write astrometry */
       /* Rewind the FitsChan */
