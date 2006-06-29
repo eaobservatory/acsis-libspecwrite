@@ -1676,7 +1676,8 @@ static void writeRecord( void * basepntr[], unsigned int frame,
   if ( *status != SAI__OK ) return;
 
   /* now copy */
-  ((double *)basepntr[POL_ANG])[frame] = record->pol_ang;
+
+  /* Real Time Sequencer */
   ((int *)basepntr[RTS_NUM])[frame] = record->rts_num;
   ((double *)basepntr[RTS_END])[frame] = record->rts_end;
 
@@ -1685,13 +1686,27 @@ static void writeRecord( void * basepntr[], unsigned int frame,
 	    SIZEOF_RTS_TASKS*frame,
 	    SIZEOF_RTS_TASKS );
 
-  ((double *)basepntr[SMU_AZ_JIG_X])[frame] = record->smu_az_jig_x;
-  ((double *)basepntr[SMU_AZ_JIG_Y])[frame] = record->smu_az_jig_y;
+  /* Secondary Mirror Unit */
   ((double *)basepntr[SMU_X])[frame] = record->smu_x;
   ((double *)basepntr[SMU_Y])[frame] = record->smu_y;
   ((double *)basepntr[SMU_Z])[frame] = record->smu_z;
+
+  cnfExprt( record->smu_chop_phase,
+	    (char *)basepntr[SMU_CHOP_PHASE]+
+	    SIZEOF_SMU_CHOP_PHASE*frame,
+	    SIZEOF_SMU_CHOP_PHASE);
+
+  ((int *)basepntr[SMU_JIG_INDEX])[frame] = record->smu_jig_index;
+  ((double *)basepntr[SMU_AZ_JIG_X])[frame] = record->smu_az_jig_x;
+  ((double *)basepntr[SMU_AZ_JIG_Y])[frame] = record->smu_az_jig_y;
+  ((double *)basepntr[SMU_AZ_CHOP_X])[frame] = record->smu_az_chop_x;
+  ((double *)basepntr[SMU_AZ_CHOP_Y])[frame] = record->smu_az_chop_y;
   ((double *)basepntr[SMU_TR_JIG_X])[frame] = record->smu_tr_jig_x;
   ((double *)basepntr[SMU_TR_JIG_Y])[frame] = record->smu_tr_jig_y;
+  ((double *)basepntr[SMU_TR_CHOP_X])[frame] = record->smu_tr_chop_x;
+  ((double *)basepntr[SMU_TR_CHOP_Y])[frame] = record->smu_tr_chop_y;
+
+  /* Telescope Control System */
   ((double *)basepntr[TCS_AIRMASS])[frame] = record->tcs_airmass;
   ((double *)basepntr[TCS_AZ_ANG])[frame] = record->tcs_az_ang;
   ((double *)basepntr[TCS_AZ_AC1])[frame] = record->tcs_az_ac1;
@@ -1700,7 +1715,14 @@ static void writeRecord( void * basepntr[], unsigned int frame,
   ((double *)basepntr[TCS_AZ_DC2])[frame] = record->tcs_az_dc2;
   ((double *)basepntr[TCS_AZ_BC1])[frame] = record->tcs_az_bc1;
   ((double *)basepntr[TCS_AZ_BC2])[frame] = record->tcs_az_bc2;
+
+  cnfExprt( record->tcs_beam,
+	    (char *)basepntr[TCS_BEAM]+
+	    SIZEOF_TCS_BEAM*frame,
+	    SIZEOF_TCS_BEAM);
+
   ((int *)basepntr[TCS_INDEX])[frame] = record->tcs_index;
+
   cnfExprt ( record->tcs_source,
 	     (char *)basepntr[TCS_SOURCE]+SIZEOF_TCS_SOURCE*frame, 
 	     SIZEOF_TCS_SOURCE );
@@ -1717,15 +1739,26 @@ static void writeRecord( void * basepntr[], unsigned int frame,
   ((double *)basepntr[TCS_TR_BC1])[frame] = record->tcs_tr_bc1;
   ((double *)basepntr[TCS_TR_BC2])[frame] = record->tcs_tr_bc2;
 
+  /* JOS control */
+  ((int *)basepntr[JOS_DRCONTROL])[frame] = record->jos_drcontrol;
+
+  /* ENVIRO task */
+  ((float *)basepntr[ENVIRO_AIR_TEMP])[frame] = record->enviro_air_temp;
+  ((float *)basepntr[ENVIRO_PRESSURE])[frame] = record->enviro_pressure;
+  ((float *)basepntr[ENVIRO_REL_HUM])[frame] = record->enviro_rel_hum;
+
+  /* POLarimeter aka ROVER */
+  ((double *)basepntr[POL_ANG])[frame] = record->pol_ang;
+
+  /* ACSIS internal */
   cnfExprt( record->acs_source_ro,
 	    (char*)basepntr[ACS_SOURCE_RO]+ SIZEOF_ACS_SOURCE_RO*frame,
 	    SIZEOF_ACS_SOURCE_RO );
 
-  ((int *)basepntr[JOS_DRCONTROL])[frame] = record->jos_drcontrol;
-
-  ((float *)basepntr[ENVIRO_AIR_TEMP])[frame] = record->enviro_air_temp;
-  ((float *)basepntr[ENVIRO_PRESSURE])[frame] = record->enviro_pressure;
-  ((float *)basepntr[ENVIRO_REL_HUM])[frame] = record->enviro_rel_hum;
+  ((int *)basepntr[ACS_NO_PREV_REF])[frame] = record->acs_no_prev_ref;
+  ((int *)basepntr[ACS_NO_NEXT_REF])[frame] = record->acs_no_next_ref;
+  ((int *)basepntr[ACS_NO_ONS])[frame] = record->acs_no_ons;
+  ((float *)basepntr[ACS_EXPOSURE])[frame] = record->acs_exposure;
 
 }
 
