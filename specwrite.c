@@ -43,7 +43,7 @@
 #define MAXFILE 1024
 
 /* Define the number of extensions we support */
-#define NEXTENSIONS 34
+#define NEXTENSIONS 45
 
 /* Maximum number of subsystems we can handle 
    We know that ACSIS can have at most 4 spectral subsystems
@@ -240,56 +240,72 @@ static int kpgPtfts( int indf, const AstFitsChan * fchan, int * status );
 #define TDIM    2
 
 /* Define indices for array of mapped pointers to extensions */
-#define POL_ANG      0
-#define RTS_NUM      1
-#define RTS_END      2
-#define RTS_TASKS    3
-#define SMU_AZ_JIG_X 4
-#define SMU_AZ_JIG_Y 5
-#define SMU_X        6
-#define SMU_Y        7
-#define SMU_Z        8 
-#define SMU_TR_JIG_X 9
-#define SMU_TR_JIG_Y 10
-#define TCS_AIRMASS  11
-#define TCS_AZ_ANG   12
-#define TCS_AZ_AC1   13
-#define TCS_AZ_AC2   14
-#define TCS_AZ_DC1   15
-#define TCS_AZ_DC2   16
-#define TCS_AZ_BC1   17
-#define TCS_AZ_BC2   18
-#define TCS_INDEX    19
-#define TCS_SOURCE   20
-#define TCS_TR_SYS   21
-#define TCS_TR_ANG   22
-#define TCS_TR_AC1   23
-#define TCS_TR_AC2   24
-#define TCS_TR_DC1   25
-#define TCS_TR_DC2   26
-#define TCS_TR_BC1   27
-#define TCS_TR_BC2   28
-#define ENVIRO_REL_HUM   29
-#define ENVIRO_PRESSURE  30
-#define ENVIRO_AIR_TEMP  31
-#define ACS_SOURCE_RO    32
-#define ACS_DRCONTROL    33
+#define RTS_NUM           0
+#define RTS_END           1
+#define RTS_TASKS         2
+#define SMU_X             3
+#define SMU_Y             4
+#define SMU_Z             5
+#define SMU_CHOP_PHASE    6
+#define SMU_JIG_INDEX     7
+#define SMU_AZ_JIG_X      8
+#define SMU_AZ_JIG_Y      9
+#define SMU_AZ_CHOP_X    10
+#define SMU_AZ_CHOP_Y    11
+#define SMU_TR_JIG_X     12
+#define SMU_TR_JIG_Y     13
+#define SMU_TR_CHOP_X    14
+#define SMU_TR_CHOP_Y    15
+#define TCS_AIRMASS      16
+#define TCS_AZ_ANG       17
+#define TCS_AZ_AC1       18
+#define TCS_AZ_AC2       19
+#define TCS_AZ_DC1       20
+#define TCS_AZ_DC2       21
+#define TCS_AZ_BC1       22
+#define TCS_AZ_BC2       23
+#define TCS_BEAM         24
+#define TCS_INDEX        25
+#define TCS_SOURCE       26
+#define TCS_TR_SYS       27
+#define TCS_TR_ANG       28
+#define TCS_TR_AC1       29
+#define TCS_TR_AC2       30
+#define TCS_TR_DC1       31
+#define TCS_TR_DC2       32
+#define TCS_TR_BC1       33
+#define TCS_TR_BC2       34
+#define JOS_DRCONTROL    35
+#define ENVIRO_REL_HUM   36
+#define ENVIRO_PRESSURE  37
+#define ENVIRO_AIR_TEMP  38
+#define POL_ANG          39
+#define ACS_SOURCE_RO    40
+#define ACS_NO_PREV_REF  41
+#define ACS_NO_NEXT_REF  42
+#define ACS_NO_ONS       43
+#define ACS_EXPOSURE     44
 
 /* Definitions of HDS types associated with ACSISRtsStates struct. All these
    will be created in the file. */
 static const char * hdsRecordNames[NEXTENSIONS][2] = 
   {
-   { "_DOUBLE", "POL_ANG" },
    { "_INTEGER", "RTS_NUM" },
    { "_DOUBLE", "RTS_END" },
    { CHARTYP(SIZEOF_RTS_TASKS), "RTS_TASKS" },
-   { "_DOUBLE", "SMU_AZ_JIG_X" },
-   { "_DOUBLE", "SMU_AZ_JIG_Y" },
    { "_DOUBLE", "SMU_X" },
    { "_DOUBLE", "SMU_Y" },
    { "_DOUBLE", "SMU_Z" },
+   { CHARTYP(SIZEOF_SMU_CHOP_PHASE), "SMU_CHOP_PHASE" },
+   { "_INTEGER", "SMU_JIG_INDEX" },
+   { "_DOUBLE", "SMU_AZ_JIG_X" },
+   { "_DOUBLE", "SMU_AZ_JIG_Y" },
+   { "_DOUBLE", "SMU_AZ_CHOP_X" },
+   { "_DOUBLE", "SMU_AZ_CHOP_Y" },
    { "_DOUBLE", "SMU_TR_JIG_X" },
    { "_DOUBLE", "SMU_TR_JIG_Y" },
+   { "_DOUBLE", "SMU_TR_CHOP_X" },
+   { "_DOUBLE", "SMU_TR_CHOP_Y" },
    { "_DOUBLE", "TCS_AIRMASS" },
    { "_DOUBLE", "TCS_AZ_ANG" },
    { "_DOUBLE", "TCS_AZ_AC1" },
@@ -298,6 +314,7 @@ static const char * hdsRecordNames[NEXTENSIONS][2] =
    { "_DOUBLE", "TCS_AZ_DC2" },
    { "_DOUBLE", "TCS_AZ_BC1" },
    { "_DOUBLE", "TCS_AZ_BC2" },
+   { CHARTYP(SIZEOF_TCS_BEAM), "TCS_BEAM" },
    { "_INTEGER", "TCS_INDEX" },
    { CHARTYP(SIZEOF_TCS_SOURCE), "TCS_SOURCE" },
    { CHARTYP(SIZEOF_TCS_TR_SYS), "TCS_TR_SYS" },
@@ -308,11 +325,16 @@ static const char * hdsRecordNames[NEXTENSIONS][2] =
    { "_DOUBLE", "TCS_TR_DC2" },
    { "_DOUBLE", "TCS_TR_BC1" },
    { "_DOUBLE", "TCS_TR_BC2" },
+   { "_INTEGER", "JOS_DRCONTROL" },
    { "_REAL", "ENVIRO_REL_HUM" },
    { "_REAL", "ENVIRO_PRESSURE" },
    { "_REAL", "ENVIRO_AIR_TEMP" },
+   { "_DOUBLE", "POL_ANG" },
    { CHARTYP(SIZEOF_ACS_SOURCE_RO), "ACS_SOURCE_RO" },
-   { "_INTEGER", "ACS_DRCONTROL" },
+   { "_INTEGER", "ACS_NO_PREV_REF" },
+   { "_INTEGER", "ACS_NO_NEXT_REF" },
+   { "_INTEGER", "ACS_NO_ONS" },
+   { "_REAL", "ACS_EXPOSURE" }
   };
 
 /* Somewhere to store the precomputed sizes of each HDS element */
@@ -1699,7 +1721,7 @@ static void writeRecord( void * basepntr[], unsigned int frame,
 	    (char*)basepntr[ACS_SOURCE_RO]+ SIZEOF_ACS_SOURCE_RO*frame,
 	    SIZEOF_ACS_SOURCE_RO );
 
-  ((int *)basepntr[ACS_DRCONTROL])[frame] = record->acs_drcontrol;
+  ((int *)basepntr[JOS_DRCONTROL])[frame] = record->jos_drcontrol;
 
   ((float *)basepntr[ENVIRO_AIR_TEMP])[frame] = record->enviro_air_temp;
   ((float *)basepntr[ENVIRO_PRESSURE])[frame] = record->enviro_pressure;

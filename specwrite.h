@@ -53,12 +53,14 @@
 */
 
 /* Some sizes used for dimensioning the string arrays */
-#define SIZEOF_RTS_TASKS  80
-#define SIZEOF_RTS_ERRS   80
-#define SIZEOF_TCS_SOURCE 32
-#define SIZEOF_TCS_TR_SYS 16
-#define SIZEOF_ACS_RECEPTOR   5
+#define SIZEOF_RTS_TASKS      80
+#define SIZEOF_RTS_ERRS       80
+#define SIZEOF_TCS_SOURCE     32
+#define SIZEOF_TCS_TR_SYS     16
+#define SIZEOF_ACS_RECEPTOR    5
 #define SIZEOF_ACS_SOURCE_RO  16
+#define SIZEOF_SMU_CHOP_PHASE  1
+#define SIZEOF_TCS_BEAM        1
 
 /* Public data structures */
 
@@ -72,7 +74,7 @@ typedef struct ACSISRtsState {
   double smu_x;
   double smu_y;
   double smu_z;
-  char   smu_chop_phase;
+  char   smu_chop_phase[SIZEOF_SMU_CHOP_PHASE+1];
   int    smu_jig_index;
   double smu_az_jig_x;
   double smu_az_jig_y;
@@ -90,7 +92,7 @@ typedef struct ACSISRtsState {
   double tcs_az_dc2;
   double tcs_az_bc1;
   double tcs_az_bc2;
-  char   tcs_beam;
+  char   tcs_beam[SIZEOF_TCS_BEAM+1];
   int    tcs_index;
   char   tcs_source[SIZEOF_TCS_SOURCE+1];
   char   tcs_tr_sys[SIZEOF_TCS_TR_SYS+1];
@@ -101,21 +103,21 @@ typedef struct ACSISRtsState {
   double tcs_tr_dc2;
   double tcs_tr_bc1;
   double tcs_tr_bc2;
+  int    jos_drcontrol; /* JOS DR control tag */
   float  enviro_rel_hum;
   float  enviro_pressure;
   float  enviro_air_temp;
-  int    acs_spec_window_id;
+  double acs_feedx;  /* Y coordinate of feed "acs_feed" */
+  double acs_feedy;  /* Y coordinate of feed "acs_feed" */
+  int    acs_spec_window_id; /* SPW id used to assign subsystem */
   unsigned int acs_feed;  /* Feed number */
   float  acs_tsys;
   float  acs_trx;
-  char   acs_source_ro[SIZEOF_ACS_SOURCE_RO+1];
-  int    acs_no_prev_refs;
-  int    acs_no_next_refs;
+  int    acs_no_prev_ref;
+  int    acs_no_next_ref;
   int    acs_no_ons;
-  int    acs_drcontrol;
   float  acs_exposure;
-  double acs_feedx;  /* Y coordinate of feed "acs_feed" */
-  double acs_feedy;  /* Y coordinate of feed "acs_feed" */
+  char   acs_source_ro[SIZEOF_ACS_SOURCE_RO+1];
 } ACSISRtsState;
 
 
