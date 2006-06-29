@@ -348,9 +348,14 @@ static size_t hdsRecordSizes[NEXTENSIONS];
 #define ACSISEXT   "ACSIS"
 #define ACSISEXTTYP "ACSIS_COMP"
 
-/* Name of the FITS header containing the subscan information. This header is the
-   only mandatory header. */
+/* Mandatory FITS headers written by spec writer itself */
+/* Name of the FITS header containing the subscan information. */
+
 #define FITS_NSUBSCAN "NSUBSCAN"
+
+/* Name of the FITS header indicating when the last subscan is found */
+
+#define FITS_OBSEND "OBSEND"
 
 /*********************** NDF "cube" FILE *************************************/
 
@@ -2679,6 +2684,13 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
       /* need to add a SUBSCAN number to the header */
       astFindFits( lfits, FITS_NSUBSCAN, NULL, 0 );
       astSetFitsI( lfits, FITS_NSUBSCAN, j, "Sub-scan number", 1);
+
+      /* need to add a OBSEND number to the header. True if
+	 this is the last file */
+      astFindFits( lfits, FITS_OBSEND, NULL, 0 );
+      astSetFitsL( lfits, FITS_OBSEND,
+		   ( j == subsys->file.subscan ? 1 : 0 ),
+		   "True if file is last in current observation", 1);
 
       /* Need to look for the BUNIT header */
       astClear( lfits, "Card");
