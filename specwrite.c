@@ -73,6 +73,7 @@ typedef struct obsData {
 typedef struct specData {
   float  * spectra;  /* Array of data to receive spectra ( nchans x nrecep x nseq) */
   double * receppos; /* Receptor positions (2 x  nrecep x nseq) */
+  float  * tsys;     /* System temp (nrecep * nseq) */
   void   * jcmtstate[NEXTENSIONS];  /* Pointers to JCMTSTATE information */
   float  * bad;      /* array of bad values to easily initialise new time slice */
   unsigned char * count;    /* array of size (nrecep x nseq) containing 1 if spectrum written
@@ -88,6 +89,7 @@ typedef struct fileInfo {
   HDSLoc * acsisloc; /* ACSIS extension locator */
   HDSLoc * extlocators[NEXTENSIONS]; /* Locators to each JCMTSTATE component */
   HDSLoc * receppos_loc;   /* Locators to each .MORE.ACSIS.RECEPPOS */  
+  HDSLoc * tsys_loc;       /* Locator to .MORE.ACSIS.TSYS */
   int extmapped;  /* JCMTSTATE extension is mapped */
   int acsismapped; /* ACSIS extension is mapped */
 } fileInfo;
@@ -153,11 +155,19 @@ static void resizeACSISExtensions( subSystem * subsys, unsigned int newsize, int
 static void closeExtensions( subSystem * subsys, int * status );
 static void closeACSISExtensions( subSystem * subsys, int * status );
 
+static void mapThisExtension( HDSLoc * loc, size_t ndim, unsigned int oldtsize, unsigned int newtsize,
+		       const char type[], void ** mapped, int * status );
+
+static void resizeThisExtension ( HDSLoc * loc, size_t ndim, unsigned int newtsize,
+				  int ismapped, unsigned int * oldtsize, int * status );
+
 static void writeRecord( void * basepntr[], unsigned int tindex,
 			 const ACSISRtsState * record,
 			 int * status );
 static void writeRecepPos( const obsData * obsinfo, double * posdata, unsigned int tindex,
 			   const ACSISRtsState * record, int * status );
+static void writeTSys( const obsData * obsinfo, float * data, unsigned int frame, 
+		       const ACSISRtsState * record, int * status );
 static unsigned int calcOffset( unsigned int nchans, unsigned int maxreceps, unsigned int nrecep, 
 				unsigned int tindex, int *status );
 
@@ -171,6 +181,8 @@ allocResources( const obsData * obsinfo, subSystem *subsys, unsigned int nseq,
 
 static void freeResources ( obsData * obsinfo, subSystem * subsys, int * status);
 static void allocPosData( const obsData *obsinfo, subSystem *subsys, unsigned int nseq, int * status );
+static void allocTsysData( const obsData * obsinfo, subSystem * subsys, unsigned int nseq, 
+			   int * status );
 static void
 flushResources( const obsData * obsinfo, subSystem * subsys, int * status );
 
@@ -686,7 +698,8 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 
   int found = 0;               /* Did we find the sequence? */
   unsigned int i;              /* loop counter */
-  double * posdata;
+  double * posdata;            /* pointer to position data */
+  float  * tsysdata;           /* pointer to Tsys data */
   void ** recdata;
   unsigned int startind;
   subSystem * subsys;
@@ -984,6 +997,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
     data = (subsys->tdata.spectra);
     recdata = (subsys->tdata.jcmtstate);
     posdata = (subsys->tdata.receppos);
+    tsysdata = (subsys->tdata.tsys);
 
     /* We would like to know the sequence number that was used previously for this
        time slot */
@@ -1034,9 +1048,10 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
       memcpy( &(data[offset]), spectrum, subsys->nchans*SIZEOF_FLOAT );
 
     /* Store record data and receptor positions. Base record only updates each
-       sequence step but recepot position should be written for all records. */
+       sequence step but receptor positions and tsys should be written for all records. */
     if (seqinc) writeRecord( recdata, tindex, record, status );
     writeRecepPos( &OBSINFO, posdata, tindex, record, status );
+    writeTSys( &OBSINFO, tsysdata, tindex, record, status );
 
     /* increment the count for this location */
     if (*status == SAI__OK) (subsys->tdata.count)[coff]++;
@@ -1773,11 +1788,9 @@ static void writeRecord( void * basepntr[], unsigned int frame,
 static void
 createACSISExtensions( const obsData * obsinfo, subSystem * subsys, unsigned int size,
 		       int * status ) {
-  unsigned int i;
   char type[DAT__SZTYP+1];   /* constructed type string */
   HDSLoc * temploc = NULL;
   hdsdim dim[3];
-  size_t nelem;
 
   if (*status != SAI__OK) return;
 
@@ -1793,8 +1806,10 @@ createACSISExtensions( const obsData * obsinfo, subSystem * subsys, unsigned int
   /* Need to create the following components:
      - RECEPTORS  _CHAR* array for each of the nrecep elements and their names. This fixed
        once written.
-     - RECEPPOS   _DOUBLE (2 * size)   x and y positions (in tracking coordinates) for each
+     - RECEPPOS   _DOUBLE (2 * nrecep * size)   x and y positions 
+       (in tracking coordinates) for each
        receptor. This array grows in the same way as JCMTSTATE.
+     - TSYS       _REAL (nrecep * size) Grows as JCMTSTATE grows.
   */
 
   /* Create the receptor component and store the names */
@@ -1813,20 +1828,28 @@ createACSISExtensions( const obsData * obsinfo, subSystem * subsys, unsigned int
   dim[2] = size;
   datNew( subsys->file.acsisloc, "RECEPPOS", "_DOUBLE", 3, dim, status );
   datFind( subsys->file.acsisloc, "RECEPPOS", &(subsys->file.receppos_loc), status );
-  datMapD( subsys->file.receppos_loc, "WRITE", 3, dim, &(subsys->tdata.receppos), status );
+  mapThisExtension( subsys->file.receppos_loc, 3, 0, size, "_DOUBLE",
+		    &(subsys->tdata.receppos), status);
 
+  /*  datMapD( subsys->file.receppos_loc, "WRITE", 3, dim, &(subsys->tdata.receppos), status );
+   */
+
+  /* Now the TSYS array and map it */
+  dim[0] = obsinfo->nrecep;
+  dim[1] = size;
+  datNew( subsys->file.acsisloc, "TSYS", "_REAL", 2, dim, status );
+  datFind( subsys->file.acsisloc, "TSYS", &(subsys->file.tsys_loc), status);
+  mapThisExtension( subsys->file.tsys_loc, 2, 0, size, "_REAL",
+		    &(subsys->tdata.tsys), status );
+
+  /*  datMapR( subsys->file.tsys_loc, "WRITE", 2, dim, &(subsys->tdata.tsys),
+	   status );
+  */
   if (*status != SAI__OK) {
     subsys->file.acsismapped = 0;
     subsys->tdata.receppos = NULL;
+    subsys->tdata.tsys = NULL;
   } else {
-
-    /* Copy in bad values - unroll since we know there is always a 2 */
-    nelem = dim[0] * dim[1] * dim[2];
-    for (i=0; i < nelem; i+=2) {
-      (subsys->tdata.receppos)[i] = VAL__BADD;
-      (subsys->tdata.receppos)[i+1] = VAL__BADD;
-    }
-
     subsys->file.acsismapped = 1;
   }
   
@@ -1837,7 +1860,7 @@ createACSISExtensions( const obsData * obsinfo, subSystem * subsys, unsigned int
 }
 
 /*
-  Resize the ACSIS RECEPPOS extensions to the supplied value.
+  Resize the ACSIS RECEPPOS and TSYS extensions to the supplied value.
   If remap is false, the arrays will not be remapped (so call at end to resize
   before annulling locators) 
 */
@@ -1846,54 +1869,144 @@ static void
 resizeACSISExtensions( subSystem * subsys, unsigned int newsize, 
 		       int remap, int * status ) {
 
-  hdsdim dim[3];
-  size_t ndim = 3;
-  int actdim;
-  unsigned int j;
-  unsigned int oldsize;
-  unsigned int ndoubles;
-  unsigned int start;
+  unsigned int old_rpos_size;
+  unsigned int old_tsys_size;
 
   if (*status != SAI__OK) return;
 
-  if (subsys->file.acsismapped)
-    datUnmap( subsys->file.receppos_loc, status );
+  /* RECEPPOS */
+  resizeThisExtension( subsys->file.receppos_loc, 3, newsize,
+		       subsys->file.acsismapped, &old_rpos_size, status );
+
+  /* TSYS */
+  resizeThisExtension( subsys->file.tsys_loc, 2, newsize,
+		       subsys->file.acsismapped, &old_tsys_size, status );
+
+
+  /* update mapped status */
+  subsys->file.acsismapped = 0;
+
+  /* Now remap these extensions */
+  if (remap && *status == SAI__OK) {
+    /* in principal old_rpos_size should equal old_tsys_size */
+    mapThisExtension( subsys->file.receppos_loc, 3, old_rpos_size, newsize, "_DOUBLE",
+		      &(subsys->tdata.receppos), status );
+    mapThisExtension( subsys->file.tsys_loc, 2, old_tsys_size, newsize, "_REAL",
+		      &(subsys->tdata.tsys), status );
+
+    subsys->file.acsismapped = ( *status == SAI__OK ? 1 : 0 );
+  }
+
+  if (*status != SAI__OK)
+    emsRep(" ", "Error resizing ACSIS extension", status );
+
+}
+
+/* resize the extension - unmapping first if necessary */
+
+static void resizeThisExtension ( HDSLoc * loc, size_t ndim, unsigned int newtsize,
+				  int ismapped, unsigned int * oldtsize, int * status ) {
+
+  hdsdim dim[DAT__MXDIM];
+  int actdim;
+
+  *oldtsize = 0;
+
+  if (*status != SAI__OK) return;
+
+  if (ismapped) {
+    datUnmap( loc, status );
+  }
 
   /* Get the current bounds */
-  datShape( subsys->file.receppos_loc, ndim, dim, &actdim, status );
+  datShape( loc, ndim, dim, &actdim, status );
 
-  if (*status != SAI__OK && ndim != (size_t)actdim) {
+  if (*status == SAI__OK && ndim != (size_t)actdim) {
     *status = SAI__ERROR;
     emsSeti( "AD", actdim);
-    emsSetu( "ND", (unsigned long) ndim );
-    emsRep(" ", "Dims mismatch in ACSIS extension. ^AD != ^ND", status);
+    emsSetu( "ND", (unsigned int) ndim );
+    emsRep(" ", "Dims mismatch in ACSIS extension during resizing. ^AD != ^ND", status);
   }
 
   /* resize */
-  oldsize = dim[ndim-1];
-  dim[ndim-1] = newsize;
-  datAlter( subsys->file.receppos_loc, ndim, dim, status);
+  if (*status == SAI__OK) {
+    *oldtsize = dim[ndim-1];
+    dim[ndim-1] = newtsize;
+    datAlter( loc, ndim, dim, status);
+  }
+}
 
-  if (remap) {
-    /* remap - assume this should be done after resizing all */
-    datMapD( subsys->file.receppos_loc, "WRITE",
-	     ndim, dim, &(subsys->tdata.receppos), status );
+/* Map the extension but also fills with bad values */
+
+static void mapThisExtension( HDSLoc * loc, size_t ndim, unsigned int oldtsize, unsigned int newtsize,
+		       const char type[], void ** mapped, int * status ) {
+
+  hdsdim dim[DAT__MXDIM];
+  int actdim;
+  unsigned int j;
+  unsigned int nelems = 0;
+  unsigned int start;
+  unsigned int secdim = 0;  /* second dimension */
+
+  if ( *status != SAI__OK) return;
+
+  /* Get the current bounds */
+  datShape( loc, ndim, dim, &actdim, status );
+
+  if (*status == SAI__OK && ndim != (size_t)actdim) {
+    *status = SAI__ERROR;
+    emsSeti( "AD", actdim);
+    emsSetu( "ND", (unsigned int) ndim );
+    emsRep(" ", "Dims mismatch in ACSIS extension during mapping. ^AD != ^ND", status);
+  }
+
+  /* map */
+  datMap( loc, type, "WRITE", ndim, dim, mapped, status );
+
+  /* Calculate how many elements we need to fill in */
+  if ( ndim == 3) {
+    nelems = dim[0] * (newtsize-oldtsize) * dim[1];
+    secdim = dim[1];
+  } else if (ndim == 2) {
+    nelems = dim[0] * (newtsize-oldtsize);
+    secdim = 1; /* hack so that calcOffset works in 2D */
+  } else {
+    if ( *status == SAI__OK ) {
+      *status = SAI__ERROR;
+      emsSetu( "ND",  ndim);
+      emsRep( " ", "Extension mapping routine can only handle 2 and 3 dimensions not ^ND - internal programming error. ",
+	      status );
+    }
+  }
+
+  /* only fill if we have new elements */
+  if (*status == SAI__OK && nelems > 0) {
+    /* fill with bad values since may not get all receptors */
+    start = calcOffset( dim[0], secdim, 0, oldtsize, status );
 
     if (*status == SAI__OK) {
-      /* fill with bad values since may not get all receptors */
-      ndoubles = dim[0] * (newsize-oldsize) * dim[1];
-      start = calcOffset( dim[0], dim[1], 0, oldsize, status );
-      if (*status == SAI__OK) {
-	for (j=0; j < ndoubles; j++) {
-	  (subsys->tdata.receppos)[start+j] = VAL__BADD;
+
+      /* need to switch on type */
+      if ( strcmp( type, "_DOUBLE") == 0 ) {
+	for (j=0; j < nelems; j++) {
+	  printf(">>>>>>>>>>> Iniitialising doubleArr %d to bad\n", (int)j);
+	  ((double *)*mapped)[start+j] = VAL__BADD;
 	}
+      } else if ( strcmp( type, "_REAL" ) == 0 ) {
+	for (j=0; j < nelems; j++) {
+	  printf(">>>>>>>>>>> Iniitialising floatArr %d to bad\n", (int)j);
+	  ((float *)*mapped)[start+j] = VAL__BADR;
+	}
+      } else {
+	*status = SAI__ERROR;
+	emsSetc( "TYP", type );
+	emsRep(" ", "Unrecognized data type: ^TYP - internal programming error",
+	       status);
       }
     }
 
   }
 
-  if (*status != SAI__OK)
-    emsRep(" ", "Error resizing ACSIS extension", status );
 
 }
 
@@ -1908,12 +2021,17 @@ static void closeACSISExtensions( subSystem * subsys, int * status ) {
   }
 
   /* Free locators */
+  datUnmap( subsys->file.receppos_loc, status );
   datAnnul( &(subsys->file.receppos_loc), status );
   subsys->tdata.receppos = NULL;
+  datUnmap( subsys->file.tsys_loc, status );
+  datAnnul( &(subsys->file.tsys_loc), status );
+  subsys->tdata.tsys = NULL;
 
   /* delete the receptor positions if never written */
   if (subsys->curpos == 0) {
     datErase(subsys->file.acsisloc, "RECEPPOS", status );
+    datErase(subsys->file.acsisloc, "TSYS", status );
   }
 
   /* Close extension */
@@ -1942,6 +2060,26 @@ static void writeRecepPos( const obsData * obsinfo, double * posdata, unsigned i
   } else {
     *status = SAI__ERROR;
     emsRep( " ", "Attempted to write receptor positions but no data array available",
+	    status );
+  }
+
+}
+
+/* Write Tsys to ACSIS extension */
+static void writeTSys( const obsData * obsinfo, float * data, unsigned int frame, 
+		       const ACSISRtsState * record, int * status ) {
+  unsigned int offset;
+
+  if (*status != SAI__OK) return;
+
+  /* Calculate offset into data array */
+  offset = calcOffset( 1, obsinfo->nrecep, record->acs_feed, frame, status );
+
+  if (data != NULL) {
+    data[offset] = record->acs_tsys;
+  } else {
+    *status = SAI__ERROR;
+    emsRep( " ", "Attempted to write Tsys information but no data array available",
 	    status );
   }
 
@@ -2149,6 +2287,7 @@ allocResources( const obsData * obsinfo, subSystem * subsys, unsigned int nseq, 
 
     allocHeaders(subsys, seq, status );
     allocPosData(obsinfo, subsys, seq, status );
+    allocTsysData(obsinfo, subsys, seq, status );
   }
 
 #else
@@ -2359,6 +2498,26 @@ static void allocPosData( const obsData * obsinfo, subSystem * subsys, unsigned 
 
 }
 
+/* Allocate memory for the Tsys data */
+
+static void allocTsysData( const obsData * obsinfo, subSystem * subsys, unsigned int nseq, int * status ) {
+  size_t nbytes;
+  unsigned int nelems;
+  unsigned int i;
+
+  if (*status != SAI__OK) return;
+
+  nelems = 2 * obsinfo->nrecep * nseq;
+  nbytes = nelems * SIZEOF_FLOAT;
+  myRealloc( (void**)&(subsys->tdata.tsys), nbytes, status );
+
+  /* Initialise since we can not guarantee that each receptor will get a value */
+  for (i=0; i<nelems; i++) {
+    (subsys->tdata.tsys)[i] = VAL__BADR;
+  }
+
+}
+
 /* re-allocate memory and set status - *pntr must be valid or NULL */
 static void myRealloc( void ** pntr, size_t nbytes, int * status ) {
   void * tmpp;
@@ -2452,6 +2611,9 @@ static size_t sizeofHDSType( const char * type, int * status ) {
 
   /* receptor positions */
   memcpy( output->tdata.receppos, input->tdata.receppos, obsinfo->nrecep * 2 * nseq * SIZEOF_DOUBLE );
+
+  /* TSys */
+  memcpy( output->tdata.tsys, input->tdata.tsys, obsinfo->nrecep * nseq * SIZEOF_FLOAT );
 
 }
 
