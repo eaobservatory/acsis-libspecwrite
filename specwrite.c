@@ -206,6 +206,8 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
 
 AstFrameSet *specWcs( const AstFrameSet *fs, int ntime, const double times[], int * status );
 
+static void checkNoFileExists( const char * file, int * status );
+
 #if SPW_DEBUG
 static double duration ( struct timeval * tp1, struct timeval * tp2 );
 #endif
@@ -542,59 +544,62 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
   sdir = createSubScanDir( dir, yyyymmdd, obsnum, status );
 
   /* Store the resulting directory and root dir */
-  strncpy(OBSINFO.datadir, sdir, MAXFILE);
-  (OBSINFO.datadir)[MAXFILE] = '\0';
-  strncpy(OBSINFO.rootdir, dir, MAXFILE);
-  (OBSINFO.rootdir)[MAXFILE] = '\0';
+  if (*status == SAI__OK) {
+    strncpy(OBSINFO.datadir, sdir, MAXFILE);
+    (OBSINFO.datadir)[MAXFILE] = '\0';
+    strncpy(OBSINFO.rootdir, dir, MAXFILE);
+    (OBSINFO.rootdir)[MAXFILE] = '\0';
 
 
-  /* we need to store the receptor names somewhere locally */
-  /* just take the simple approach of a buffer of strings of equal
-     length that we can datPutC */
-  /* find the longest receptor name */
-  receplen = 0;
-  if (recepnames != NULL) {
-    for (i=0; i < nrecep; i++) {
-      len = strlen( recepnames[i] );
-      if (receplen < len ) receplen = len;
-    }
-  }
-
-  /* Allocate memory for the receptor names */
-  if (receplen > 0 ) {
-    recep_name_buff = starMalloc( receplen * nrecep );
-
-    /* copy characters into buffer */
-    if (recep_name_buff != NULL) {
-      cpos = recep_name_buff;
-      for (i=0; i<nrecep; i++) {
-	cnfExprt( recepnames[i], cpos, receplen);
-	cpos += receplen;
+    /* we need to store the receptor names somewhere locally */
+    /* just take the simple approach of a buffer of strings of equal
+       length that we can datPutC */
+    /* find the longest receptor name */
+    receplen = 0;
+    if (recepnames != NULL) {
+      for (i=0; i < nrecep; i++) {
+	len = strlen( recepnames[i] );
+	if (receplen < len ) receplen = len;
       }
     }
+
+    /* Allocate memory for the receptor names */
+    if (receplen > 0 ) {
+      recep_name_buff = starMalloc( receplen * nrecep );
+
+      /* copy characters into buffer */
+      if (recep_name_buff != NULL) {
+	cpos = recep_name_buff;
+	for (i=0; i<nrecep; i++) {
+	  cnfExprt( recepnames[i], cpos, receplen);
+	  cpos += receplen;
+	}
+      }
+    }
+
+    /* Store receptor information */
+    OBSINFO.receplen = receplen;
+    OBSINFO.recep_name_buff = recep_name_buff;
+
+    /* Need an NDF/cache per subsystem. Make sure everything is initialised here.
+       We allocate the resources the first time that acsSpecWriteTS is called. */
+    for (i = 0; i < nsubsys; i++) {
+
+      /* Select the subsystem to modify */
+      subsys = &(SUBSYS[i]);
+
+      /* zero it out */
+      memset( subsys, 0, sizeof(*subsys));
+
+      /* Some intialisation */
+      subsys->index = i;
+
+    }
+
+    /* indicate that an observation is now ready */
+    INPROGRESS = 1;
+
   }
-
-  /* Store receptor information */
-  OBSINFO.receplen = receplen;
-  OBSINFO.recep_name_buff = recep_name_buff;
-
-  /* Need an NDF/cache per subsystem. Make sure everything is initialised here.
-     We allocate the resources the first time that acsSpecWriteTS is called. */
-  for (i = 0; i < nsubsys; i++) {
-
-    /* Select the subsystem to modify */
-    subsys = &(SUBSYS[i]);
-
-    /* zero it out */
-    memset( subsys, 0, sizeof(*subsys));
-
-    /* Some intialisation */
-    subsys->index = i;
-
-  }
-
-  /* indicate that an observation is now ready */
-  INPROGRESS = 1;
 
   /* Complete */
   return;
@@ -1445,6 +1450,8 @@ createSubScanDir( const char * rootdir, unsigned int yyyymmdd, unsigned int obsn
 
   dir = getDirName( rootdir, yyyymmdd, obsnum, status );
 
+  checkNoFileExists( dir, status );
+
   if ( *status == SAI__OK) {
     mode = S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH;
     st = mkdir( dir, mode );
@@ -1531,6 +1538,13 @@ openNDF( const obsData * obsinfo, const subSystem * template, subSystem * file,
 #if SPW_DEBUG
   printf("Opening NDF file '%s' to default size of %u sequence steps\n", ndfname, ngrow);
 #endif
+
+  /* Sanity check - want to make sure that we do not open a file that
+     is already there. There could be a race condition between the
+     check and the rename() but that should be impossible in normal DA
+     usage so we ignore the possibility.
+  */
+  checkNoFileExists( ndfname, status );
 
   /* create the NDF */
   ndfPlace( NULL, ndfname, &place, status );
@@ -2739,7 +2753,7 @@ void writeFlagFile (const obsData * obsinfo, const subSystem subsystems[],
 
   /* Force permissions on the temp file so that the pipeline can read it */
   if (*status == SAI__OK) {
-    sysstat = fchmod(fd, S_IRUSR|S_IRGRP|S_IROTH);
+    sysstat = fchmod(fd, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
     if (sysstat == -1) {
 	*status = SAI__ERROR;
 	emsSyser( "ERRNO", errno );
@@ -2783,6 +2797,14 @@ void writeFlagFile (const obsData * obsinfo, const subSystem subsystems[],
   /* rename temp file to okfile and close temp file */
   okfile = getOkFileName( obsinfo->rootdir, obsinfo->yyyymmdd,
 			  obsinfo->obsnum, status );
+
+  /* Sanity check - want to make sure that we do not open a file that
+     is already there. There could be a race condition between the
+     check and the rename() but that should be impossible in normal DA
+     usage so we ignore the possibility.
+  */
+  checkNoFileExists( okfile, status );
+
   if (*status == SAI__OK) {
     sysstat = rename(tmpok, okfile);
     if (sysstat == -1) {
@@ -2951,7 +2973,7 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
       /* we may want to set permissions on the file to stop unwary people overwriting it
 	 or even the acquisition system itself. */
       if (*status == SAI__OK) {
-	sysstat = chmod( fname, S_IRUSR | S_IRGRP | S_IROTH );
+	sysstat = chmod( fname, S_IRUSR | S_IWUSR| S_IRGRP | S_IROTH );
 	if (sysstat == -1) {
 	  *status = SAI__ERROR;
 	  emsSyser( "ERRNO", errno );
@@ -3194,7 +3216,36 @@ L999:
 
 }
 
+/* inherited status is set to bad if the named file already exists */
 
+static void checkNoFileExists( const char * file, int * status ) {
+
+  struct stat fstat;     /* some where to store result from stat() */
+  int err;               /* status code from stat() */
+
+  if (*status != SAI__OK) return;
+
+  /* There could be a race condition between the stat and subsequent
+     but that should be impossible in normal DA usage so we ignore the
+     possibility.
+  */
+  err = stat( file, &fstat);
+  /* good error status means the file already exists */
+  if (err == 0) {
+    *status = SAI__ERROR;
+    if (S_ISDIR(fstat.st_mode)) {
+      emsSetc("T", "Directory");
+    } else {
+      emsSetc("T", "File");
+    }
+    emsSetc("F", file );
+    emsRep(" ","^T ^F already exists. Not allowed to overwrite. "
+	   "The data acquisition system is misconfigured - "
+	   "please check your observation number is correct.",
+	   status);
+  }
+
+}
 
 /******************** kpgPtfts ***********************/
 
