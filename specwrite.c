@@ -742,7 +742,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 
   /* Some elements are compatibility elements for SCUBA-2 and should be
      cleared here so that ACSIS does not have to worry about them */
-  strcpy( record->smu_chop_phase, " " );
+  strcpy( (char *)record->smu_chop_phase, " " );
 
   /* Get local copy of subsystem from global */
   subsys = &(SUBSYS[subsysnum]);
@@ -1795,6 +1795,7 @@ createACSISExtensions( const obsData * obsinfo, subSystem * subsys, unsigned int
   char type[DAT__SZTYP+1];   /* constructed type string */
   HDSLoc * temploc = NULL;
   hdsdim dim[3];
+  void * tpntr = NULL;
 
   if (*status != SAI__OK) return;
 
@@ -1833,7 +1834,9 @@ createACSISExtensions( const obsData * obsinfo, subSystem * subsys, unsigned int
   datNew( subsys->file.acsisloc, "RECEPPOS", "_DOUBLE", 3, dim, status );
   datFind( subsys->file.acsisloc, "RECEPPOS", &(subsys->file.receppos_loc), status );
   mapThisExtension( subsys->file.receppos_loc, 3, 0, size, "_DOUBLE",
-		    &(subsys->tdata.receppos), status);
+		    &tpntr, status);
+  subsys->tdata.receppos = tpntr;
+  tpntr = NULL;
 
   /*  datMapD( subsys->file.receppos_loc, "WRITE", 3, dim, &(subsys->tdata.receppos), status );
    */
@@ -1844,7 +1847,8 @@ createACSISExtensions( const obsData * obsinfo, subSystem * subsys, unsigned int
   datNew( subsys->file.acsisloc, "TSYS", "_REAL", 2, dim, status );
   datFind( subsys->file.acsisloc, "TSYS", &(subsys->file.tsys_loc), status);
   mapThisExtension( subsys->file.tsys_loc, 2, 0, size, "_REAL",
-		    &(subsys->tdata.tsys), status );
+		    &tpntr, status );
+  subsys->tdata.tsys = tpntr;
 
   /*  datMapR( subsys->file.tsys_loc, "WRITE", 2, dim, &(subsys->tdata.tsys),
 	   status );
@@ -1875,6 +1879,7 @@ resizeACSISExtensions( subSystem * subsys, unsigned int newsize,
 
   unsigned int old_rpos_size;
   unsigned int old_tsys_size;
+  void * tpntr = NULL;
 
   if (*status != SAI__OK) return;
 
@@ -1894,10 +1899,12 @@ resizeACSISExtensions( subSystem * subsys, unsigned int newsize,
   if (remap && *status == SAI__OK) {
     /* in principal old_rpos_size should equal old_tsys_size */
     mapThisExtension( subsys->file.receppos_loc, 3, old_rpos_size, newsize, "_DOUBLE",
-		      &(subsys->tdata.receppos), status );
+		      &tpntr, status );
+    subsys->tdata.receppos = tpntr;
+    tpntr = NULL;
     mapThisExtension( subsys->file.tsys_loc, 2, old_tsys_size, newsize, "_REAL",
-		      &(subsys->tdata.tsys), status );
-
+		      &tpntr, status );
+    subsys->tdata.tsys = tpntr;
     subsys->file.acsismapped = ( *status == SAI__OK ? 1 : 0 );
   }
 
@@ -2810,10 +2817,11 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
   HDSLoc * tloc = NULL;    /* Locator to time data */
   double * tdata = NULL;   /* Pointer to mapped MJD time data */
   int      tempscal = 0;   /* temperature scale? */
+  void * tpntr = NULL;     /* temporary generic pointer */
   AstFrameSet * specwcs = NULL; /* framset for timeseries cube */
   char * stemp = NULL;     /* temporary pointer to string */
   int sysstat;             /* status from system call */
-  const char * history[1] = { "Finalise headers and make ICD compliant." };
+  char * history[1] = { "Finalise headers and make ICD compliant." };
 
   /* headers to be retained */
   char * retainfits[] = {
@@ -2909,7 +2917,9 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
       /* need the time information */
       ndfXloc( indf, STATEEXT, "READ", &xloc, status );
       datFind( xloc, "RTS_END", &tloc, status );
-      datMapV( tloc, "_DOUBLE", "READ", &tdata, &tsize, status );
+      
+      datMapV( tloc, "_DOUBLE", "READ", &tpntr, &tsize, status );
+      tdata = tpntr;
 
       /* calculate the frameset */
       specwcs = specWcs( wcs, (int)tsize, tdata, status);
@@ -3047,7 +3057,7 @@ AstFrameSet *specWcs( const AstFrameSet *fs, int ntime, const double times[], in
    AstTimeFrame *timefrm;
    AstUnitMap *spacemap;
    double tcopy[2];  /* local copy of time lut for when only 1 number present */
-   double *ltimes;  /* pointer to a time array */
+   const double *ltimes;  /* pointer to a time array */
    int nax, iax, iax_spec, ax_out[ NDF__MXDIM ];
 
 /* Initialise. */
