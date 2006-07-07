@@ -740,6 +740,10 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 	    status );
   }
 
+  /* Some elements are compatibility elements for SCUBA-2 and should be
+     cleared here so that ACSIS does not have to worry about them */
+  strcpy( record->smu_chop_phase, " " );
+
   /* Get local copy of subsystem from global */
   subsys = &(SUBSYS[subsysnum]);
 
@@ -1989,12 +1993,10 @@ static void mapThisExtension( HDSLoc * loc, size_t ndim, unsigned int oldtsize, 
       /* need to switch on type */
       if ( strcmp( type, "_DOUBLE") == 0 ) {
 	for (j=0; j < nelems; j++) {
-	  printf(">>>>>>>>>>> Iniitialising doubleArr %d to bad\n", (int)j);
 	  ((double *)*mapped)[start+j] = VAL__BADD;
 	}
       } else if ( strcmp( type, "_REAL" ) == 0 ) {
 	for (j=0; j < nelems; j++) {
-	  printf(">>>>>>>>>>> Iniitialising floatArr %d to bad\n", (int)j);
 	  ((float *)*mapped)[start+j] = VAL__BADR;
 	}
       } else {
@@ -2421,6 +2423,10 @@ static void freeResources ( obsData * obsinfo, subSystem * subsys, int * status)
     if (subsys->tdata.receppos != NULL) {
       starFree( subsys->tdata.receppos );
       subsys->tdata.receppos = NULL;
+    }
+    if (subsys->tdata.tsys != NULL) {
+      starFree( subsys->tdata.tsys );
+      subsys->tdata.tsys = NULL;
     }
 
   }
