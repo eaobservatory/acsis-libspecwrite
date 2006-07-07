@@ -32,6 +32,9 @@
 /* Enable memory cache */
 #define USE_MEMORY_CACHE 1
 
+/* pi/180:  degrees to radians */
+#define DD2R 0.017453292519943295769236907684886127134428718885417
+
 /* Debug prints */
 
 /* Standard debugging messages */
@@ -709,6 +712,8 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
   unsigned int startind;
   subSystem * subsys;
 
+  ACSISRtsState  state;        /* local editable copy of state information */
+
   if (*status != SAI__OK) return;
 
   /* make sure that the subsys number is in range */
@@ -745,9 +750,21 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 	    status );
   }
 
+  /* first need to take a local copy for editing */
+  memcpy( &state, record, sizeof(ACSISRtsState) );
+
   /* Some elements are compatibility elements for SCUBA-2 and should be
      cleared here so that ACSIS does not have to worry about them */
-  strcpy( (char *)record->smu_chop_phase, " " );
+  strcpy( state.smu_chop_phase, " " );
+  strcpy( state.tcs_beam, " " );
+  state.smu_az_chop_x = VAL__BADD;
+  state.smu_az_chop_y = VAL__BADD;
+  state.smu_tr_chop_x = VAL__BADD;
+  state.smu_tr_chop_y = VAL__BADD;
+
+  /* also convert the feed coordinates from degrees to radians */
+  state.acs_feedx *= DD2R;
+  state.acs_feedy *= DD2R;
 
   /* Get local copy of subsystem from global */
   subsys = &(SUBSYS[subsysnum]);
@@ -835,7 +852,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
     /* if the supplied value is the most recent value then we do not 
        need to search */
 
-    if (record->rts_num == subsys->curseq) {
+    if (state.rts_num == subsys->curseq) {
 
       tindex = subsys->curpos - 1;
       /* printf("Reusing sequence %u at index %u\n", subsys->curseq, tindex); */
@@ -852,7 +869,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
       startind = subsys->curpos;
       found = 0;
       for (i = 1; i < max_behind; i++) {
-	if (record->rts_num == rtsseqs[startind-i]) {
+	if (state.rts_num == rtsseqs[startind-i]) {
 	  /* found the sequence */
 	  tindex = startind - i;
 	  found = 1;
@@ -862,7 +879,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 
       if (found == 0) {
 #if SPW_DEBUG_LEVEL2
-	printf("Did not find sequence %u\n", record->rts_num);
+	printf("Did not find sequence %u\n", state.rts_num);
 #endif
 	/* did not find this sequence number so it is a new one */
 	tindex = subsys->curpos; /* curpos will be incremented */
@@ -871,9 +888,9 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 	/* going back in time so this may not be efficient */
 #if SPW_DEBUG_LEVEL2
 	printf("Sequence %u matches index %u. Previous seq num=%u\n", 
-	       record->rts_num, tindex, subsys->curseq);
+	       state.rts_num, tindex, subsys->curseq);
 #endif
-	subsys->curseq = record->rts_num;
+	subsys->curseq = state.rts_num;
 
       }
     }
@@ -884,11 +901,11 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
   if (seqinc) {
 
 #if SPW_DEBUG_LEVEL2
-    printf("Incrementing sequence number to sequence %u\n", record->rts_num);
+    printf("Incrementing sequence number to sequence %u\n", state.rts_num);
 #endif
 
     /* store the new value */
-    subsys->curseq = record->rts_num;
+    subsys->curseq = state.rts_num;
 
     /* increment the counters value */
     (subsys->curpos)++;
@@ -899,8 +916,8 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
        number to extend. (but we know at least 1) */
     reqnum = 1;
 
-    if ( record->rts_endnum > record->rts_num ) {
-      reqnum = record->rts_endnum - record->rts_num + 1;
+    if ( state.rts_endnum > state.rts_num ) {
+      reqnum = state.rts_endnum - state.rts_num + 1;
     }
 
     /* Calculate the length of this sequence if it is started by this
@@ -1000,7 +1017,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
     /* Calculate offset into array - number of spectra into the array times number of
        channels per spectrum. */
     offset = calcOffset( subsys->nchans, OBSINFO.nrecep,
-			 record->acs_feed, tindex, status );
+			 state.acs_feed, tindex, status );
 
     /* Get local copies of pointers */
     data = (subsys->tdata.spectra);
@@ -1014,7 +1031,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
     if (!seqinc) last_seqnum = (((unsigned int *)recdata[RTS_NUM])[tindex]);
 
     /* Calculate offset into count array: a  */
-    coff = calcOffset( 1, OBSINFO.nrecep, record->acs_feed, tindex, status );
+    coff = calcOffset( 1, OBSINFO.nrecep, state.acs_feed, tindex, status );
 
     /* check to make sure this slot is free */
     if ( (subsys->tdata.count)[coff] != 0) {
@@ -1022,7 +1039,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 	*status = SAI__ERROR;
 	emsSetu("CURSEQ", subsys->curseq );
 	emsSetu("PREVSEQ", last_seqnum);
-	emsSetu("FEED", record->acs_feed );
+	emsSetu("FEED", state.acs_feed );
 	if ( (subsys->tdata.count)[coff] == 1 ) {
 	  emsRep(" ", "acsSpecWriteTS: Error. Overwriting a slot that already contains a spectrum"
 		 " (current sequence number = ^CURSEQ, previous sequence was ^PREVSEQ,"
@@ -1050,7 +1067,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 
 #if SPW_DEBUG_LEVEL2
     printf(">><<>> Writing spectrum from feed %u to tindex %u curpos %u offset %u\n",
-	   record->acs_feed, tindex, subsys->curpos, offset);
+	   state.acs_feed, tindex, subsys->curpos, offset);
 #endif
 
     if (*status == SAI__OK)
@@ -1058,9 +1075,9 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 
     /* Store record data and receptor positions. Base record only updates each
        sequence step but receptor positions and tsys should be written for all records. */
-    if (seqinc) writeRecord( recdata, tindex, record, status );
-    writeRecepPos( &OBSINFO, posdata, tindex, record, status );
-    writeTSys( &OBSINFO, tsysdata, tindex, record, status );
+    if (seqinc) writeRecord( recdata, tindex, &state, status );
+    writeRecepPos( &OBSINFO, posdata, tindex, &state, status );
+    writeTSys( &OBSINFO, tsysdata, tindex, &state, status );
 
     /* increment the count for this location */
     if (*status == SAI__OK) (subsys->tdata.count)[coff]++;
@@ -1070,7 +1087,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 
 #if SPW_DEBUG
       printf("<<< Sequence %u (tindex=%u) completed with this spectrum for feed %u\n",
-	     subsys->curseq, tindex, record->acs_feed);
+	     subsys->curseq, tindex, state.acs_feed);
 #endif
       /* We *could* flush to disk at this point if we do not think the next sequence
 	 will fit. This may alleviate network contention if we end up dumping the
@@ -1078,7 +1095,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 	 sequence is complete. We may need to check that the previous few are
 	 also complete if we get them in random order.
       */
-      if ( subsys->curseq == record->rts_endnum ) {
+      if ( subsys->curseq == state.rts_endnum ) {
 
 	/* Sequence complete so no longer in a sequence */
 	subsys->inseq = 0;
@@ -1104,7 +1121,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
     }
 
     /* reset insequence flag if this was the last sequence step in it*/
-    if (subsys->curseq == record->rts_endnum) subsys->inseq = 0;
+    if (subsys->curseq == state.rts_endnum) subsys->inseq = 0;
 
 #if SPW_DEBUG_LEVEL2
     if (seqinc && *status == SAI__OK) {
