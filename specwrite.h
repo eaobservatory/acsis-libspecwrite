@@ -28,6 +28,9 @@
 *        Original version.
 *     21-APR-2006 (TIMJ):
 *        nchans now used in specWrite not specOpen.
+*     07-JUL-2006 (TIMJ):
+*        acsSpecWriteTS now returns a result indicating whether the
+*        spectrum was treated as a science or calibration spectrum.
 
 *  Copyright:
 *     Copyright (C) 2006 Particle Physics and Astronomy Research Council.
@@ -133,11 +136,11 @@ void acsSpecOpenTS( const char * dir,
 		    int * status );
 
 /* Write a spectrum to the file */
-void acsSpecWriteTS( unsigned int subsys,
-		     unsigned int nchans,
-		     const float spectrum[],
-		     const ACSISRtsState * state,
-		     int * status );
+int acsSpecWriteTS( unsigned int subsys,
+		    unsigned int nchans,
+		    const float spectrum[],
+		    const ACSISRtsState * state,
+		    int * status );
 
 /* Close the file */
 void acsSpecCloseTS( const AstFitsChan * fits[],

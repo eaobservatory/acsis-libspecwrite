@@ -618,8 +618,8 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 *     Write a spectrum to an HDS time-series file.
 
 *  Invocation:
-*     acsSpecWriteTS( unsigned int subsys, unsigned int nchans, const float spectrum[], 
-*                     const ACSISRtsState * record,
+*     result = acsSpecWriteTS( unsigned int subsys, unsigned int nchans, 
+*                     const float spectrum[], const ACSISRtsState * record,
 *                     int *status);
 
 *  Language:
@@ -645,6 +645,12 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 
 *  Authors:
 *     TIMJ: Tim Jenness (JAC, Hawaii)
+
+*  Returned Value:
+*     acsSpecWriteTS = int
+*        Returns 1 if the spectrum was accepted as a science
+*        spectrum. Returns -1 if the spectrum was processed as
+*        a calibration. Value is undefined if bad status is returned.
 
 *  History:
 *     27-FEB-2006 (TIMJ):
@@ -685,7 +691,7 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 *-
 */
 
-void
+int
 acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectrum[], 
 		const ACSISRtsState* record,
 	        int * status ) {
@@ -714,7 +720,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 
   ACSISRtsState  state;        /* local editable copy of state information */
 
-  if (*status != SAI__OK) return;
+  if (*status != SAI__OK) return 0;
 
   /* make sure that the subsys number is in range */
   if ( subsysnum >= maxsubsys ) {
@@ -722,7 +728,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
     emsSetu("IN", subsysnum);
     emsSeti("MAX", maxsubsys-1);
     emsRep(" ","acsSpecWriteTS: Supplied subsystem number (^IN) exceeds max allowed (^MAX)", status);
-    return;
+    return 0;
   }
   if (subsysnum >= OBSINFO.nsubsys) {
     *status = SAI__ERROR;
@@ -730,7 +736,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
     emsSetu( "MAX", OBSINFO.nsubsys -1 );
     emsRep( " ", "acsSpecWriteTS: Supplied subsystem number (^IN) exceeds number supplied to "
 	    "acsSpecOpenTS (^MAX)", status);
-    return;
+    return 0;
   }
 
   /* Check to see if we've already been called */
@@ -738,7 +744,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
     *status = SAI__ERROR;
     emsRep("HDS_SPEC_WRITETS_ERR1",
 	   "acsSpecWriteTS called, yet an observation has not been initialised", status);
-    return;
+    return 0;
   }
 
   /* Check feed range */
@@ -748,6 +754,14 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
     emsSetu( "FEED", record->acs_feed );
     emsRep( " ", "acsSpecWriteTS called, yet the feed number (^FEED) exceeds the expected number (^NR)",
 	    status );
+  }
+
+  /* check that we are SPECTRUM_RESULT. In the future this will trigger the
+     use of a CALDATA extension for calibrations but that is not yet
+     implemented. */
+  if ( strncmp( record->acs_source_ro, "SPECTRUM_RESULT", SIZEOF_ACS_SOURCE_RO )
+       != 0) {
+    return -1;
   }
 
   /* first need to take a local copy for editing */
@@ -827,7 +841,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
     emsSetu( "SS", subsysnum );
     emsRep( " ", "acsSpecWriteTS: Number of channels in subsystem ^SS has changed "
 	    "from ^REF to ^IN", status );
-    return;
+    return 0;
   }
 
   /* Allocate resources for this subsystem if not currently allocated */
@@ -1151,7 +1165,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 
   } /* status ok for writing a spectrum */
 
-  return;
+  return 1;
 }
 
 /*
