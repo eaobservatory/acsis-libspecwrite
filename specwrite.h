@@ -115,7 +115,6 @@ typedef struct ACSISRtsState {
   int    acs_spec_window_id; /* SPW id used to assign subsystem */
   unsigned int acs_feed;  /* Feed number */
   float  acs_tsys;
-  float  acs_trx;
   int    acs_no_prev_ref;
   int    acs_no_next_ref;
   int    acs_no_ons;
