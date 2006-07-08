@@ -154,13 +154,17 @@ main ( void ) {
   record.pol_ang = 3.14159;
   record.rts_num = 0;
   step_time_in_days = rts_step / SPD;
+  /*  step_time_in_days = 0.5;*/
   record.rts_end  = 53797.0;
   strcpy(record.rts_tasks, "SIMULATOR");
-  record.acs_trx = VAL__BADR;
-  record.acs_tsys = VAL__BADR;
+  record.acs_tsys = 52.8;
   *(record.tcs_source) = '\0';
   *(record.tcs_tr_sys) = '\0';
-  *(record.acs_source_ro) = '\0';
+  strcpy(record.acs_source_ro, "SPECTRUM_RESULT");
+  record.acs_no_prev_ref = 1;
+  record.acs_no_next_ref = 1;
+  record.acs_no_ons = 1;
+  record.acs_exposure = 1.0 / DUMPRATE;
 
   /* Open NDF */
   for (i = 0; i < nsubsys; i++) {
