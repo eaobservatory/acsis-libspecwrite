@@ -2916,11 +2916,13 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
       lfits = astCopy( fits[i] );
 
       /* need to add a SUBSCAN number to the header */
+      astClear( lfits, "Card" );
       astFindFits( lfits, FITS_NSUBSCAN, NULL, 0 );
       astSetFitsI( lfits, FITS_NSUBSCAN, j, "Sub-scan number", 1);
 
       /* need to add a OBSEND number to the header. True if
 	 this is the last file */
+      astClear( lfits, "Card" );
       astFindFits( lfits, FITS_OBSEND, NULL, 0 );
       astSetFitsL( lfits, FITS_OBSEND,
 		   ( j == subsys->file.subscan ? 1 : 0 ),
