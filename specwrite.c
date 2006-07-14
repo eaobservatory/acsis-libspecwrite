@@ -1293,6 +1293,8 @@ acsSpecCloseTS( const AstFitsChan * fits[], int incArchiveBounds, int * status )
      any FITS headers.
   */
 
+  astShow( fits[0] );
+
   writeWCSandFITS( &OBSINFO, SUBSYS, fits, &lstat );
 
   /* Write the flag file contents */
