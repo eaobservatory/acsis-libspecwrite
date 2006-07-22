@@ -35,12 +35,12 @@
 /* pi/180:  degrees to radians */
 #define DD2R 0.017453292519943295769236907684886127134428718885417
 
-/* Debug prints */
-
-/* Standard debugging messages */
-#define SPW_DEBUG 1
-/* Extra debugging messages */
-#define SPW_DEBUG_LEVEL2 0
+/* Debug prints
+   0 - disabled
+   1 - standard debug 
+   2 - verbose debug
+ */
+#define SPW_DEBUG_LEVEL 0
 
 /* Largest file name allowed (including path) */
 #define MAXFILE 1024
@@ -211,7 +211,7 @@ AstFrameSet *specWcs( const AstFrameSet *fs, int ntime, const double times[], in
 
 static void checkNoFileExists( const char * file, int * status );
 
-#if SPW_DEBUG
+#if SPW_DEBUG_LEVEL > 0
 static double duration ( struct timeval * tp1, struct timeval * tp2 );
 #endif
 
@@ -229,7 +229,7 @@ static int kpgPtfts( int indf, const AstFitsChan * fchan, int * status );
 #define LONGTIME 2.0
 
 /* Macro to time an event */
-#if SPW_DEBUG
+#if SPW_DEBUG_LEVEL > 0
 #define TIMEME(label,func) { struct timeval tp1; struct timeval tp2; double tpdiff; \
     gettimeofday( &tp1, NULL ); \
     func;			\
@@ -373,6 +373,10 @@ static size_t hdsRecordSizes[NEXTENSIONS];
 /* Name of the FITS header indicating when the last subscan is found */
 
 #define FITS_OBSEND "OBSEND"
+
+/* Name of fits header for temperature scale */
+
+#define FITS_TEMPSCAL "TEMPSCAL"
 
 /*********************** NDF "cube" FILE *************************************/
 
@@ -806,7 +810,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
     maxseq = MAXBYTES / ( nperseq * SIZEOF_FLOAT );
     subsys->maxsize = ( maxseq > MAXSEQ ? MAXSEQ : maxseq );
 
-#if SPW_DEBUG_LEVEL2
+#if SPW_DEBUG_LEVEL > 1
     printf("Calculated maximum number of sequence steps per file: %u\n", subsys->maxsize);
 #endif
 
@@ -846,7 +850,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 
   /* Allocate resources for this subsystem if not currently allocated */
   if (!subsys->alloced) {
-#if SPW_DEBUG_LEVEL2
+#if SPW_DEBUG_LEVEL > 1
     printf("+++++++ Need to allocate resources on entry to WriteTS\n");
 #endif
     allocResources( &OBSINFO, subsys, subsys->maxsize, status );
@@ -892,7 +896,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
       }
 
       if (found == 0) {
-#if SPW_DEBUG_LEVEL2
+#if SPW_DEBUG_LEVEL > 1
 	printf("Did not find sequence %u\n", state.rts_num);
 #endif
 	/* did not find this sequence number so it is a new one */
@@ -900,7 +904,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 	seqinc = 1;
       } else {
 	/* going back in time so this may not be efficient */
-#if SPW_DEBUG_LEVEL2
+#if SPW_DEBUG_LEVEL > 1
 	printf("Sequence %u matches index %u. Previous seq num=%u\n", 
 	       state.rts_num, tindex, subsys->curseq);
 #endif
@@ -914,7 +918,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 
   if (seqinc) {
 
-#if SPW_DEBUG_LEVEL2
+#if SPW_DEBUG_LEVEL > 1
     printf("Incrementing sequence number to sequence %u\n", state.rts_num);
 #endif
 
@@ -937,7 +941,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
     /* Calculate the length of this sequence if it is started by this
        sequence step. */
     if (!subsys->inseq) {
-#if SPW_DEBUG_LEVEL2
+#if SPW_DEBUG_LEVEL > 1
       printf("+++++++++++++++++++++SEQLEN set to %u\n",reqnum);
 #endif
       subsys->seqlen = reqnum;
@@ -953,7 +957,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
        we may as well give a good hint rather than resize each time around.
      */
     if ( reqnum > (subsys->maxsize - subsys->curpos) ) {
-#if SPW_DEBUG_LEVEL2
+#if SPW_DEBUG_LEVEL > 1
       printf("Length of sequence = %u Maxspace = %u Currently=%u\n",
 	      reqnum, subsys->maxsize, subsys->curpos);
 #endif
@@ -985,7 +989,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 	subsys->curpos--;
 
 	/* flush what we have to disk */
-#if SPW_DEBUG_LEVEL2
+#if SPW_DEBUG_LEVEL > 1
 	printf("--------flush after unexpected grow\n");
 #endif
 	flushResources( &OBSINFO, subsys, status );
@@ -995,7 +999,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 	ngrow = subsys->maxsize;
 #endif
 
-#if SPW_DEBUG_LEVEL2
+#if SPW_DEBUG_LEVEL > 1
 	printf("------- alloc after unexpected grow\n");
 #endif
 	allocResources( &OBSINFO, subsys, ngrow, status );
@@ -1009,7 +1013,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 	subsys->curpos = 1;
 
       } else {
-#if SPW_DEBUG
+#if SPW_DEBUG_LEVEL > 0
 	printf("Cursize: %u Curpos: %u ngrow: %u maxsize: %u ; Need to resize.\n",
 	       subsys->cursize, subsys->curpos, ngrow, subsys->maxsize); 
 #endif
@@ -1022,7 +1026,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
   /* copy in the data */
   if (*status == SAI__OK) {
 
-#if SPW_DEBUG
+#if SPW_DEBUG_LEVEL > 0
     if (seqinc) {
       printf(">>> About to write first spectrum at position %u for sequence %u\n", tindex,
 	     subsys->curseq);
@@ -1079,7 +1083,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
       }
     }
 
-#if SPW_DEBUG_LEVEL2
+#if SPW_DEBUG_LEVEL > 1
     printf(">><<>> Writing spectrum from feed %u to tindex %u curpos %u offset %u\n",
 	   state.acs_feed, tindex, subsys->curpos, offset);
 #endif
@@ -1099,7 +1103,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
     /* see whether this sequence is complete */
     if ( hasSeqSpectra( &OBSINFO, subsys, tindex, status ) ) {
 
-#if SPW_DEBUG
+#if SPW_DEBUG_LEVEL > 0
       printf("<<< Sequence %u (tindex=%u) completed with this spectrum for feed %u\n",
 	     subsys->curseq, tindex, state.acs_feed);
 #endif
@@ -1121,7 +1125,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 	  if ( (subsys->maxsize - subsys->curpos) < subsys->seqlen ) {
 	    /* write what we have pre-emptively even if the next sequence
 	       turns out to be shorter */
-#if SPW_DEBUG
+#if SPW_DEBUG_LEVEL > 0
 	    printf("!!!!!!! COMPLETE SEQUENCE & FULL BUFFER <<<<<<<<\n");
 #endif
 	    flushResources( &OBSINFO, subsys, status );
@@ -1137,7 +1141,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
     /* reset insequence flag if this was the last sequence step in it*/
     if (subsys->curseq == state.rts_endnum) subsys->inseq = 0;
 
-#if SPW_DEBUG_LEVEL2
+#if SPW_DEBUG_LEVEL > 1
     if (seqinc && *status == SAI__OK) {
       printf(">>> Wrote first spectrum "
 #  if USE_MEMORY_CACHE
@@ -1147,7 +1151,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 #  endif  /* USE_MEMORY_CACHE */
 	     "at this position %u (curpos = %u)\n", tindex, subsys->curpos );
     }
-#endif  /* SPW_DEBUG_LEVEL2 */
+#endif  /* SPW_DEBUG_LEVEL */
 
     /* Sanity check - curpos must either be 1 or one bigger than
        earlier if we added a new sequence. It can not be 0 if a spectrum
@@ -1275,7 +1279,7 @@ acsSpecCloseTS( const AstFitsChan * fits[], int incArchiveBounds, int * status )
     subsys = &(SUBSYS[i]);
     if ( subsys->file.indf != NDF__NOID || subsys->tdata.spectra != NULL) {
       found = 1;
-#if SPW_DEBUG_LEVEL2
+#if SPW_DEBUG_LEVEL > 1
       printf("-------- Final close flush\n");
 #endif
       flushResources( &OBSINFO, subsys, &lstat);
@@ -1293,7 +1297,9 @@ acsSpecCloseTS( const AstFitsChan * fits[], int incArchiveBounds, int * status )
      any FITS headers.
   */
 
+#if SPW_DEBUG_LEVEL > 1
   astShow( fits[0] );
+#endif
 
   writeWCSandFITS( &OBSINFO, SUBSYS, fits, &lstat );
 
@@ -1547,7 +1553,7 @@ openNDF( const obsData * obsinfo, const subSystem * template, subSystem * file,
      value - should this explicitly come from the template? */
   (file->file.subscan)++;
 
-#if SPW_DEBUG
+#if SPW_DEBUG_LEVEL > 0
   printf("Opening file associated with subsystem %d (subscan %u)\n",template->index, file->file.subscan);
 #endif
   /* Name the NDF component */
@@ -1568,7 +1574,7 @@ openNDF( const obsData * obsinfo, const subSystem * template, subSystem * file,
   file->maxsize = template->maxsize;
   file->nchans = template->nchans;
 
-#if SPW_DEBUG
+#if SPW_DEBUG_LEVEL > 0
   printf("Opening NDF file '%s' to default size of %u sequence steps\n", ndfname, ngrow);
 #endif
 
@@ -2166,7 +2172,7 @@ closeNDF( subSystem * subsys, int * status ) {
   }
 
   /* Unmap */
-#if SPW_DEBUG
+#if SPW_DEBUG_LEVEL > 0
   printf("Unmap current NDF to close the file\n");
 #endif
   TIMEME("Final unmap", ndfUnmap( file->indf, "DATA", status ););
@@ -2179,7 +2185,7 @@ closeNDF( subSystem * subsys, int * status ) {
     ubnd[TDIM] = lbnd[TDIM];
   }
 
-#if SPW_DEBUG
+#if SPW_DEBUG_LEVEL > 0
   printf("Setting final bounds. Resize to %lld time steps\n", (unsigned long long)ubnd[TDIM]);
 #endif
   TIMEME( "Final set bounds", ndfSbnd(NDIMS, lbnd, ubnd, file->indf, status ););
@@ -2191,7 +2197,7 @@ closeNDF( subSystem * subsys, int * status ) {
   /* Close file */
   ndfAnnul( &(file->indf), status );
 
-#if SPW_DEBUG
+#if SPW_DEBUG_LEVEL > 0
   printf("Wrote %d sequence steps to subsystem %d (max was %d)\n", subsys->curpos, subsys->index,
 	 subsys->cursize);
 #endif
@@ -2228,7 +2234,7 @@ resizeNDF( const obsData * obsinfo, subSystem * subsys, unsigned int newsize, in
   unsigned int i;
 
   /* Unmap the data array */
-#if SPW_DEBUG
+#if SPW_DEBUG_LEVEL > 0
   printf("Unmap data array in preparation for resize\n");
 #endif
   TIMEME( "ndfUnmap", ndfUnmap(subsys->file.indf, "DATA", status ););
@@ -2267,14 +2273,14 @@ resizeNDF( const obsData * obsinfo, subSystem * subsys, unsigned int newsize, in
   newt = ubnd[TDIM] - lbnd[TDIM] + 1;
 
   /* set new bounds */
-#if SPW_DEBUG
+#if SPW_DEBUG_LEVEL > 0
   printf("Setting new bounds. Grow to %lld sequence steps (from %lld)\n", (unsigned long long)newt,
 	 (unsigned long long)(newt-newsize));
 #endif
   TIMEME("Set NDF bounds", ndfSbnd( NDIMS, lbnd, ubnd, subsys->file.indf, status ););
 
   /* map data array again */
-#if SPW_DEBUG
+#if SPW_DEBUG_LEVEL > 0
   printf("Remap the data array\n");
 #endif
   TIMEME("Remp NDF", ndfMap( subsys->file.indf, "DATA", "_REAL", "WRITE", datapntrs, &itemp, status ););
@@ -2404,7 +2410,7 @@ static void
 flushResources( const obsData * obsinfo, subSystem * subsys, int * status ) {
 
   subSystem * toclose;  /* pointer to subsystem struct we are actually closing */
-#if SPW_DEBUG
+#if SPW_DEBUG_LEVEL > 0
   double percent = 0.0;
 #endif
 
@@ -2413,13 +2419,13 @@ flushResources( const obsData * obsinfo, subSystem * subsys, int * status ) {
 #if USE_MEMORY_CACHE
   subSystem output;  /* Some where to store file information */
 
-#if SPW_DEBUG
+#if SPW_DEBUG_LEVEL > 0
   if (subsys->cursize > 0) {
     percent = 100.0 * (double)subsys->curpos / (double)subsys->cursize;
   }
   printf("Flushing with memory cache = %u/%u (%.1f%% capacity)\n", subsys->curpos,
 	 subsys->cursize, percent);
-#endif /* SPW_DEBUG */
+#endif /* SPW_DEBUG_LEVEL */
 
   /* if we have no spectra we have nothing to write so do not want
      to open the NDF - should we set status? */
@@ -2911,7 +2917,9 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
 			   obsinfo->obsnum, j, status );
 
       /* open the NDF */
+#if SPW_DEBUG_LEVEL > 0
       printf("Writing file FITS header %s\n", fname );
+#endif
       ndfOpen( NULL, fname, "UPDATE", "OLD", &indf, &place, status );
 
       /* manipulate FITS header here...First take a copy. */
@@ -2920,7 +2928,7 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
       /* need to add a SUBSCAN number to the header */
       astClear( lfits, "Card" );
       astFindFits( lfits, FITS_NSUBSCAN, NULL, 0 );
-      astSetFitsI( lfits, FITS_NSUBSCAN, j, "Sub-scan number", 1);
+      astSetFitsI( lfits, FITS_NSUBSCAN, (int)j, "Sub-scan number", 1);
 
       /* need to add a OBSEND number to the header. True if
 	 this is the last file */
@@ -2946,10 +2954,22 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
       if (tempscal) {
 	/* Note the use of AST control codes for subscript/superscript */
 	ndfCput( "T%s60+%v30+A%^50+%<20+*%+   corrected antenna temperature", indf, "LABEL", status );
+	/* and look for a TEMPSCAL fits header  - which should be undef by default and
+	   so can stay undef if we are uncalibrated */
+	astClear( lfits, "Card" );
+	if ( astFindFits( lfits, FITS_TEMPSCAL, NULL, 0 ) ) {
+	  astSetFitsS(lfits, FITS_TEMPSCAL, "TA*", "Temperature scale in use", 1);
+	}
+
       } else {
 	ndfCput( "Power", indf, "LABEL", status );
       }
       
+      /* Remove the END card */
+      astClear( lfits, "Card" );
+      if (astFindFits( lfits, "END", NULL, 0 ) ) {
+	astDelFits( lfits );
+      }
 
       /* Bounds associated with this file */
 
@@ -3034,7 +3054,7 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
 
 /********************************** Debug functions ********************/
 
-#if SPW_DEBUG
+#if SPW_DEBUG_LEVEL > 0
 /* simply subtract two timeval structs and return the answer */
 /* Does tp2 - tp1 */
 static double duration ( struct timeval * tp1, struct timeval * tp2 ) {
