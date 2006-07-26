@@ -31,6 +31,8 @@
 *     07-JUL-2006 (TIMJ):
 *        acsSpecWriteTS now returns a result indicating whether the
 *        spectrum was treated as a science or calibration spectrum.
+*     26-JUL-2006 (TIMJ):
+*        acsSpecOpenTS now gets focal plane information.
 
 *  Copyright:
 *     Copyright (C) 2006 Particle Physics and Astronomy Research Council.
@@ -133,6 +135,9 @@ void acsSpecOpenTS( const char * dir,
 		    unsigned int nrecep,
 		    unsigned int nsubsys,
 		    const char* recepnames[],
+		    const char* focal_station,
+		    const float fplanex[],  /* Arcsec offsets in X, Y of */
+		    const float fplaney[],  /* each receptor. */
 		    int * status );
 
 /* Write a spectrum to the file */

@@ -102,6 +102,13 @@ static const char *recepnames[] = { "H01",
 				    "H16",
 };
 
+static const char focal_station[] = "DIRECT";
+
+const float fplanex[] = { 1.0f,2.0f,3.0f,4.0f,5.0f,6.0f,7.6f,8.2f,
+			  9.2f,10.f,11.f,12.f,13.f,14.f,15.f,16.f };
+const float fplaney[] = { -1.0f,2.0f,3.0f,4.0f,5.0f,6.0f,7.6f,8.2f,
+			  -9.2f,10.f,11.f,12.f,13.f,14.f,15.f,16.f };
+
 /* Prototypes */
 static int kpgGtfts( int indf, AstFitsChan ** fchan, int * status );
 static double duration ( struct timeval * tp1, struct timeval * tp2, int * status );
@@ -172,7 +179,8 @@ main ( void ) {
     fits[i] = fitschan;
   }
 
-  acsSpecOpenTS( ".", 20060607, 53, NRECEP, nsubsys, recepnames, &status);
+  acsSpecOpenTS( ".", 20060607, 53, NRECEP, nsubsys, recepnames,
+		 focal_station, fplanex, fplaney, &status);
   c = 0;
   record.rts_endnum = 0;
   for (seq = 0; seq < NSEQ; seq++) {

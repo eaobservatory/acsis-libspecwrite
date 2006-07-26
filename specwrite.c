@@ -55,6 +55,9 @@
 #define MAXSUBSYS 4
 static const unsigned int maxsubsys = MAXSUBSYS;
 
+/* String size for obsData */
+#define SPW__SZFSTAT 10
+
 /* Global state variables */
 
 /* This struct gives an overview of the observation state itself */
@@ -63,6 +66,9 @@ typedef struct obsData {
   unsigned int nrecep;
   size_t receplen;       /* longest receptor name */
   char * recep_name_buff;  /* buffer for receptor names */
+  char focal_station[SPW__SZFSTAT+1];  /* Focal station of this instrument */
+  float * fplanex;        /* X and Y coordinates of receptors in focal plane arcsec */
+  float * fplaney;
   /* observation number, ut date and number of subsystems */
   unsigned int obsnum;
   unsigned int yyyymmdd;
@@ -421,6 +427,8 @@ static size_t hdsRecordSizes[NEXTENSIONS];
 *     acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, 
 *                    unsigned int obsnum, unsigned int nrecep,
 *                    unsigned int nsubsys, const char *recepnames[],
+*                    const char * focal_station,
+*                    const float fplanex[], const float fplaney[],
 *                    int * status );
 
 *  Language:
@@ -445,6 +453,12 @@ static size_t hdsRecordSizes[NEXTENSIONS];
 *        Number of subsystems present in this observation.
 *     recepnames[] = const char*[] (Given)
 *        Names of each receptor in feed order.
+*     focal_station = const char* (Given)
+*        Focal station for the instrument. [DIRECT, NASMYTH_L, NASMYTH_R]
+*     fplanex[] = const float[] (Given)
+*        X offsets of each receptor in the focal plane (arcsec).
+*     fplaney[] = const float[] (Given)
+*        Y offsets of each receptor in the focal plane (arcsec).
 *     status = int * (Given & Returned)
 *        Inherited status.
 
@@ -458,6 +472,8 @@ static size_t hdsRecordSizes[NEXTENSIONS];
 *        Use structured globals
 *     21-APR-2006 (TIMJ):
 *        Defer resource allocation until the first spectrum arrives.
+*     26-JUL-2005 (TIMJ):
+*        Add FPLANE arguments.
 
 *  Notes:
 *     - Currently only one observation can be active at any time
@@ -499,7 +515,10 @@ static size_t hdsRecordSizes[NEXTENSIONS];
 void
 acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 	       unsigned int nrecep, unsigned int nsubsys, 
-	       const char *recepnames[], int * status ) {
+	       const char *recepnames[],
+	       const char * focal_station,
+	       const float fplanex[], const float fplaney[],
+	       int * status ) {
 
   char * cpos = NULL;          /* offset into string */
   unsigned int i;              /* Loop counter */
@@ -546,6 +565,14 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
   OBSINFO.obsnum   = obsnum;
   OBSINFO.nsubsys  = nsubsys;
   OBSINFO.nrecep  = nrecep;
+  if (focal_station != NULL) {
+    strncpy( OBSINFO.focal_station, focal_station, SPW__SZFSTAT );
+    (OBSINFO.focal_station)[SPW__SZFSTAT] = '\0';
+  } else {
+    (OBSINFO.focal_station)[0] = '\0';
+  }
+  OBSINFO.fplanex = NULL;
+  OBSINFO.fplaney = NULL;
 
   /* Create the directory to receive each subscan */
   sdir = createSubScanDir( dir, yyyymmdd, obsnum, status );
@@ -584,7 +611,15 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
       }
     }
 
-    /* Store receptor information */
+    /* Allocate memory for the focal plane offsets */
+    if (*status == SAI__OK && fplanex != NULL && fplaney != NULL) {
+      OBSINFO.fplanex = starMalloc( nrecep * sizeof(*fplanex) );
+      OBSINFO.fplaney = starMalloc( nrecep * sizeof(*fplaney) );
+      memcpy( OBSINFO.fplanex, fplanex, nrecep * sizeof(*fplanex) );
+      memcpy( OBSINFO.fplaney, fplaney, nrecep * sizeof(*fplaney) );
+    }
+
+    /* Store dynamic receptor information */
     OBSINFO.receplen = receplen;
     OBSINFO.recep_name_buff = recep_name_buff;
 
@@ -1880,6 +1915,29 @@ createACSISExtensions( const obsData * obsinfo, subSystem * subsys, unsigned int
     datAnnul( &temploc, status );
   }
 
+  /* Create the FOCAL_STATION component and store it */
+  if (obsinfo->nrecep > 0 && strlen(obsinfo->focal_station) > 0 ) {
+    datNew0C( (subsys->file.acsisloc), "FOCAL_STATION", strlen(obsinfo->focal_station),
+	      status);
+    datFind( (subsys->file.acsisloc), "FOCAL_STATION", &temploc, status );
+    datPut0C( temploc, obsinfo->focal_station, status);
+    datAnnul( &temploc, status );
+  }
+
+  /* Focal plane positions */
+  if ( obsinfo->fplanex != NULL ) {
+    datNew1R( (subsys->file.acsisloc), "FPLANEX", obsinfo->nrecep, status );
+    datFind( (subsys->file.acsisloc), "FPLANEX", &temploc, status );
+    datPut1R( temploc, obsinfo->nrecep, obsinfo->fplanex, status);
+    datAnnul( &temploc, status );
+  }
+  if ( obsinfo->fplaney != NULL ) {
+    datNew1R( (subsys->file.acsisloc), "FPLANEY", obsinfo->nrecep, status );
+    datFind( (subsys->file.acsisloc), "FPLANEY", &temploc, status );
+    datPut1R( temploc, obsinfo->nrecep, obsinfo->fplaney, status);
+    datAnnul( &temploc, status );
+  }
+
   /* Now create the positions array and map it */
   dim[0] = 2;
   dim[1] = obsinfo->nrecep;
@@ -2505,6 +2563,16 @@ static void freeResources ( obsData * obsinfo, subSystem * subsys, int * status)
     starFree( obsinfo->recep_name_buff );
     obsinfo->recep_name_buff = NULL;
     obsinfo->receplen = 0;
+  }
+
+  if (obsinfo->fplanex != NULL) {
+    starFree( obsinfo->fplanex );
+    obsinfo->fplanex = NULL;
+  }
+
+  if (obsinfo->fplaney != NULL) {
+    starFree( obsinfo->fplaney );
+    obsinfo->fplaney = NULL;
   }
 
 }
