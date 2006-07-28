@@ -151,6 +151,7 @@ main ( void ) {
   /* Create header - obtain from test file */
   ndfFind( NULL, "testhdr", &indf, &status );
   kpgGtfts( indf, &fitschan, &status );
+  ndfAnnul( &indf, &status );
 
   /* information */
   printf("Required data rate: %d MB/s\n", DATARATE );
