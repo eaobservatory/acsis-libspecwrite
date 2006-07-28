@@ -795,11 +795,14 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 	    status );
   }
 
-  /* check that we are SPECTRUM_RESULT. In the future this will trigger the
-     use of a CALDATA extension for calibrations but that is not yet
-     implemented. */
-  if ( strncmp( record->acs_source_ro, "SPECTRUM_RESULT", SIZEOF_ACS_SOURCE_RO )
-       != 0) {
+  /* check that we are SPECTRUM_RESULT or SOURCE. In the future this
+     will trigger the use of a CALDATA extension for calibrations but
+     that is not yet implemented. */
+  if ( (strncmp( record->acs_source_ro, "SPECTRUM_RESULT", SIZEOF_ACS_SOURCE_RO )
+	!= 0) &&
+       (strncmp( record->acs_source_ro, "SOURCE", SIZEOF_ACS_SOURCE_RO )
+	!= 0) ) {
+    printf("Can not accept source of '%s'\n", record->acs_source_ro );
     return -1;
   }
 
