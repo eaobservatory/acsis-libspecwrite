@@ -166,6 +166,7 @@ main ( void ) {
   record.rts_end  = 53797.0;
   strcpy(record.rts_tasks, "SIMULATOR");
   record.acs_tsys = 52.8;
+  record.acs_trx = 256.7;
   *(record.tcs_source) = '\0';
   *(record.tcs_tr_sys) = '\0';
   strcpy(record.acs_source_ro, "SPECTRUM_RESULT");

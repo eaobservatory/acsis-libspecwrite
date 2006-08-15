@@ -83,6 +83,7 @@ typedef struct specData {
   float  * spectra;  /* Array of data to receive spectra ( nchans x nrecep x nseq) */
   double * receppos; /* Receptor positions (2 x  nrecep x nseq) */
   float  * tsys;     /* System temp (nrecep * nseq) */
+  float  * trx;      /* Receptor receiver temp (nrecep * nseq) */
   void   * jcmtstate[NEXTENSIONS];  /* Pointers to JCMTSTATE information */
   float  * bad;      /* array of bad values to easily initialise new time slice */
   unsigned char * count;    /* array of size (nrecep x nseq) containing 1 if spectrum written
@@ -99,6 +100,7 @@ typedef struct fileInfo {
   HDSLoc * extlocators[NEXTENSIONS]; /* Locators to each JCMTSTATE component */
   HDSLoc * receppos_loc;   /* Locators to each .MORE.ACSIS.RECEPPOS */  
   HDSLoc * tsys_loc;       /* Locator to .MORE.ACSIS.TSYS */
+  HDSLoc * trx_loc;        /* Locator to .MORE.ACSIS.TRX */
   int extmapped;  /* JCMTSTATE extension is mapped */
   int acsismapped; /* ACSIS extension is mapped */
 } fileInfo;
@@ -175,8 +177,8 @@ static void writeRecord( void * basepntr[], unsigned int tindex,
 			 int * status );
 static void writeRecepPos( const obsData * obsinfo, double * posdata, unsigned int tindex,
 			   const ACSISRtsState * record, int * status );
-static void writeTSys( const obsData * obsinfo, float * data, unsigned int frame, 
-		       const ACSISRtsState * record, int * status );
+static void writeTSysTRx( const obsData * obsinfo, float * tsysdata, float * trxdata,
+			  unsigned int frame, const ACSISRtsState * record, int * status );
 static unsigned int calcOffset( unsigned int nchans, unsigned int maxreceps, unsigned int nrecep, 
 				unsigned int tindex, int *status );
 
@@ -190,7 +192,7 @@ allocResources( const obsData * obsinfo, subSystem *subsys, unsigned int nseq,
 
 static void freeResources ( obsData * obsinfo, subSystem * subsys, int * status);
 static void allocPosData( const obsData *obsinfo, subSystem *subsys, unsigned int nseq, int * status );
-static void allocTsysData( const obsData * obsinfo, subSystem * subsys, unsigned int nseq, 
+static void allocTsysTrxData( const obsData * obsinfo, subSystem * subsys, unsigned int nseq, 
 			   int * status );
 static void
 flushResources( const obsData * obsinfo, subSystem * subsys, int * status );
@@ -753,6 +755,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
   unsigned int i;              /* loop counter */
   double * posdata;            /* pointer to position data */
   float  * tsysdata;           /* pointer to Tsys data */
+  float  * trxdata;            /* pointer to Trx data */
   void ** recdata;
   unsigned int startind;
   subSystem * subsys;
@@ -1080,6 +1083,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
     recdata = (subsys->tdata.jcmtstate);
     posdata = (subsys->tdata.receppos);
     tsysdata = (subsys->tdata.tsys);
+    trxdata = (subsys->tdata.trx);
 
     /* We would like to know the sequence number that was used previously for this
        time slot */
@@ -1130,10 +1134,11 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
       memcpy( &(data[offset]), spectrum, subsys->nchans*SIZEOF_FLOAT );
 
     /* Store record data and receptor positions. Base record only updates each
-       sequence step but receptor positions and tsys should be written for all records. */
+       sequence step but receptor positions and tsys/trx should be written 
+       for all records. */
     if (seqinc) writeRecord( recdata, tindex, &state, status );
     writeRecepPos( &OBSINFO, posdata, tindex, &state, status );
-    writeTSys( &OBSINFO, tsysdata, tindex, &state, status );
+    writeTSysTRx( &OBSINFO, tsysdata, trxdata, tindex, &state, status );
 
     /* increment the count for this location */
     if (*status == SAI__OK) (subsys->tdata.count)[coff]++;
@@ -1906,6 +1911,7 @@ createACSISExtensions( const obsData * obsinfo, subSystem * subsys, unsigned int
        (in tracking coordinates) for each
        receptor. This array grows in the same way as JCMTSTATE.
      - TSYS       _REAL (nrecep * size) Grows as JCMTSTATE grows.
+     - TRX        _REAL (nrecep * size) Grows as JCMTSTATE grows.
   */
 
   /* Create the receptor component and store the names */
@@ -1963,14 +1969,20 @@ createACSISExtensions( const obsData * obsinfo, subSystem * subsys, unsigned int
   mapThisExtension( subsys->file.tsys_loc, 2, 0, size, "_REAL",
 		    &tpntr, status );
   subsys->tdata.tsys = tpntr;
+  tpntr = NULL;
 
-  /*  datMapR( subsys->file.tsys_loc, "WRITE", 2, dim, &(subsys->tdata.tsys),
-	   status );
-  */
+  /* and TRX array - identical to TSYS */
+  datNew( subsys->file.acsisloc, "TRX", "_REAL", 2, dim, status );
+  datFind( subsys->file.acsisloc, "TRX", &(subsys->file.trx_loc), status);
+  mapThisExtension( subsys->file.trx_loc, 2, 0, size, "_REAL",
+		    &tpntr, status );
+  subsys->tdata.trx = tpntr;
+
   if (*status != SAI__OK) {
     subsys->file.acsismapped = 0;
     subsys->tdata.receppos = NULL;
     subsys->tdata.tsys = NULL;
+    subsys->tdata.trx = NULL;
   } else {
     subsys->file.acsismapped = 1;
   }
@@ -1982,7 +1994,7 @@ createACSISExtensions( const obsData * obsinfo, subSystem * subsys, unsigned int
 }
 
 /*
-  Resize the ACSIS RECEPPOS and TSYS extensions to the supplied value.
+  Resize the ACSIS RECEPPOS and TSYS/TRX extensions to the supplied value.
   If remap is false, the arrays will not be remapped (so call at end to resize
   before annulling locators) 
 */
@@ -1993,6 +2005,7 @@ resizeACSISExtensions( subSystem * subsys, unsigned int newsize,
 
   unsigned int old_rpos_size;
   unsigned int old_tsys_size;
+  unsigned int old_trx_size;
   void * tpntr = NULL;
 
   if (*status != SAI__OK) return;
@@ -2004,6 +2017,10 @@ resizeACSISExtensions( subSystem * subsys, unsigned int newsize,
   /* TSYS */
   resizeThisExtension( subsys->file.tsys_loc, 2, newsize,
 		       subsys->file.acsismapped, &old_tsys_size, status );
+
+  /* TRX */
+  resizeThisExtension( subsys->file.trx_loc, 2, newsize,
+		       subsys->file.acsismapped, &old_trx_size, status );
 
 
   /* update mapped status */
@@ -2019,6 +2036,10 @@ resizeACSISExtensions( subSystem * subsys, unsigned int newsize,
     mapThisExtension( subsys->file.tsys_loc, 2, old_tsys_size, newsize, "_REAL",
 		      &tpntr, status );
     subsys->tdata.tsys = tpntr;
+    tpntr = NULL;
+    mapThisExtension( subsys->file.trx_loc, 2, old_trx_size, newsize, "_REAL",
+		      &tpntr, status );
+    subsys->tdata.trx = tpntr;
     subsys->file.acsismapped = ( *status == SAI__OK ? 1 : 0 );
   }
 
@@ -2150,11 +2171,15 @@ static void closeACSISExtensions( subSystem * subsys, int * status ) {
   datUnmap( subsys->file.tsys_loc, status );
   datAnnul( &(subsys->file.tsys_loc), status );
   subsys->tdata.tsys = NULL;
+  datUnmap( subsys->file.trx_loc, status );
+  datAnnul( &(subsys->file.trx_loc), status );
+  subsys->tdata.trx = NULL;
 
   /* delete the receptor positions if never written */
   if (subsys->curpos == 0) {
     datErase(subsys->file.acsisloc, "RECEPPOS", status );
     datErase(subsys->file.acsisloc, "TSYS", status );
+    datErase(subsys->file.acsisloc, "TRX", status );
   }
 
   /* Close extension */
@@ -2188,9 +2213,10 @@ static void writeRecepPos( const obsData * obsinfo, double * posdata, unsigned i
 
 }
 
-/* Write Tsys to ACSIS extension */
-static void writeTSys( const obsData * obsinfo, float * data, unsigned int frame, 
-		       const ACSISRtsState * record, int * status ) {
+/* Write Tsys and Trx to ACSIS extension */
+static void writeTSysTRx( const obsData * obsinfo, float * tsys_data,
+			 float * trx_data, unsigned int frame, 
+			 const ACSISRtsState * record, int * status ) {
   unsigned int offset;
 
   if (*status != SAI__OK) return;
@@ -2198,12 +2224,15 @@ static void writeTSys( const obsData * obsinfo, float * data, unsigned int frame
   /* Calculate offset into data array */
   offset = calcOffset( 1, obsinfo->nrecep, record->acs_feed, frame, status );
 
-  if (data != NULL) {
-    data[offset] = record->acs_tsys;
+  if (tsys_data != NULL && trx_data != NULL ) {
+    tsys_data[offset] = record->acs_tsys;
+    trx_data[offset] = record->acs_trx;
   } else {
-    *status = SAI__ERROR;
-    emsRep( " ", "Attempted to write Tsys information but no data array available",
-	    status );
+    if (*status == SAI__OK) {
+      *status = SAI__ERROR;
+      emsRep( " ", "Attempted to write Tsys/Trx information but no data array available",
+	      status );
+    }
   }
 
 }
@@ -2410,7 +2439,7 @@ allocResources( const obsData * obsinfo, subSystem * subsys, unsigned int nseq, 
 
     allocHeaders(subsys, seq, status );
     allocPosData(obsinfo, subsys, seq, status );
-    allocTsysData(obsinfo, subsys, seq, status );
+    allocTsysTrxData(obsinfo, subsys, seq, status );
   }
 
 #else
@@ -2549,6 +2578,10 @@ static void freeResources ( obsData * obsinfo, subSystem * subsys, int * status)
       starFree( subsys->tdata.tsys );
       subsys->tdata.tsys = NULL;
     }
+    if (subsys->tdata.trx != NULL) {
+      starFree( subsys->tdata.trx );
+      subsys->tdata.trx = NULL;
+    }
 
   }
 
@@ -2635,9 +2668,10 @@ static void allocPosData( const obsData * obsinfo, subSystem * subsys, unsigned 
 
 }
 
-/* Allocate memory for the Tsys data */
+/* Allocate memory for the Tsys and Trx data */
 
-static void allocTsysData( const obsData * obsinfo, subSystem * subsys, unsigned int nseq, int * status ) {
+static void allocTsysTrxData( const obsData * obsinfo, subSystem * subsys,
+			      unsigned int nseq, int * status ) {
   size_t nbytes;
   unsigned int nelems;
   unsigned int i;
@@ -2647,10 +2681,12 @@ static void allocTsysData( const obsData * obsinfo, subSystem * subsys, unsigned
   nelems = 2 * obsinfo->nrecep * nseq;
   nbytes = nelems * SIZEOF_FLOAT;
   myRealloc( (void**)&(subsys->tdata.tsys), nbytes, status );
+  myRealloc( (void**)&(subsys->tdata.trx), nbytes, status );
 
   /* Initialise since we can not guarantee that each receptor will get a value */
   for (i=0; i<nelems; i++) {
     (subsys->tdata.tsys)[i] = VAL__BADR;
+    (subsys->tdata.trx)[i] = VAL__BADR;
   }
 
 }
@@ -2749,8 +2785,9 @@ static size_t sizeofHDSType( const char * type, int * status ) {
   /* receptor positions */
   memcpy( output->tdata.receppos, input->tdata.receppos, obsinfo->nrecep * 2 * nseq * SIZEOF_DOUBLE );
 
-  /* TSys */
+  /* TSys and TRx */
   memcpy( output->tdata.tsys, input->tdata.tsys, obsinfo->nrecep * nseq * SIZEOF_FLOAT );
+  memcpy( output->tdata.trx, input->tdata.trx, obsinfo->nrecep * nseq * SIZEOF_FLOAT );
 
 }
 
