@@ -19,6 +19,7 @@
 #include "ndf.h"
 #include "ast.h"
 #include "ems.h"
+#include "ems_par.h"
 #include "mers.h"
 #include "prm_par.h"
 #include "star/mem.h"
@@ -29,7 +30,7 @@
 /* Application name for history writing */
 #define APPNAME "ACSIS-DA (V" PACKAGE_VERSION ")"
 
-/* Enable memory cache */
+/* Enable memory cache - it's highly likely that things will break if this is 0 */
 #define USE_MEMORY_CACHE 1
 
 /* pi/180:  degrees to radians */
@@ -213,7 +214,7 @@ void writeFlagFile (const obsData * obsinfo, const subSystem subsystems[],
 		    int * status);
 
 void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
-		      const AstFitsChan * fits[], int * status);
+		      const AstFitsChan * fits[], int badfits[], char errbuff[], int * status);
 
 AstFrameSet *specWcs( const AstFrameSet *fs, int ntime, const double times[], int * status );
 
@@ -540,6 +541,12 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
     emsSetu("MAX", maxsubsys);
     emsRep("HDS_SPEC_OPENTS_ERR0",
 	   "acsSpecOpenTS: number of subsystems supplied (^NIN) exceeds expected maximum of ^MAX", status);
+    return;
+  }
+  if (nsubsys == 0) {
+    *status = SAI__ERROR;
+    emsRep("HDS_SPEC_OPENTS_ERR0x",
+	   "acsSpecOpenTS: number of subsystems must be greater than 0", status );
     return;
   }
 
@@ -1291,6 +1298,8 @@ acsSpecCloseTS( const AstFitsChan * fits[], int incArchiveBounds, int * status )
   int found = 0;            /* Found an open NDF? */
   subSystem * subsys;       /* specific subsystem */
   int lstat = SAI__OK;      /* Local status */
+  int badfits[MAXSUBSYS];   /* Were the FITS headers bad at all? */
+  char errbuff[EMS__SZMSG+1]; /* first error message from AST */
 
   /* Ideally should not automatically abort on entry since we may be required
      to save the spectra that we have already been given. The trick is in proceeding
@@ -1344,11 +1353,23 @@ acsSpecCloseTS( const AstFitsChan * fits[], int incArchiveBounds, int * status )
   astShow( fits[0] );
 #endif
 
-  writeWCSandFITS( &OBSINFO, SUBSYS, fits, &lstat );
+  writeWCSandFITS( &OBSINFO, SUBSYS, fits, badfits, errbuff, &lstat );
 
   /* Write the flag file contents */
 
   writeFlagFile( &OBSINFO, SUBSYS, &lstat);
+
+  /* Check whether local status should be set bad because of a dodgy FITS header */
+  if (lstat == SAI__OK) {
+    for (i = 0; i < OBSINFO.nsubsys; i++) {
+      if ( badfits[i] ) {
+	if (lstat == SAI__OK) lstat = SAI__ERROR;
+	emsRep( " ", errbuff, &lstat ); /* internal AST message */
+	emsSetu( "SUB", i);
+	emsRep( " ", "FITS header for subsystem ^SUB contained incorrect WCS.", &lstat);
+      }
+    }
+  }
 
   /* Force globals to be reset */
   for (i = 0; i < maxsubsys; i++) {
@@ -1358,8 +1379,10 @@ acsSpecCloseTS( const AstFitsChan * fits[], int incArchiveBounds, int * status )
 
   /* reset progress */
   INPROGRESS = 0;
-
+  
+  /* handle a local bad status */
   if (lstat != SAI__OK) {
+    /* report some helper message */
     emsRep( " ", "Error closing Spectrum file", &lstat );
   }
 
@@ -2970,7 +2993,8 @@ void writeFlagFile (const obsData * obsinfo, const subSystem subsystems[],
 }
 
 void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
-		      const AstFitsChan * fits[], int * status) {
+		      const AstFitsChan * fits[], int badfits[], 
+		      char errbuff[], int * status) {
 
   char * fname;             /* file name of a given subscan */
   unsigned int i;           /* Loop counter */
@@ -2990,7 +3014,11 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
   AstFrameSet * specwcs = NULL; /* framset for timeseries cube */
   char * stemp = NULL;     /* temporary pointer to string */
   int sysstat;             /* status from system call */
+  char units[72];          /* Unit string from fits header BUNIT */
   char * history[1] = { "Finalise headers and make ICD compliant." };
+  int   parlen = 0;        /* returned length of param */
+  char  param[EMS__SZPAR+1]; /* temp buffer for EMS param name */
+  int   oplen  = 0;       /* returned length of errbuff */
 
   /* headers to be retained */
   char * retainfits[] = {
@@ -3018,6 +3046,74 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
     /* local subsystem */
     subsys = &(subsystems[i]);
 
+    /* Extract astrometry from a local copy (so we do not damage the fitschan
+       provided to use - this can be done outside the subscan loop */
+    lfits = astCopy( fits[i] );
+
+    /* extract astrometry from the FITS header. We do this first so that we can
+       decide whether we are writing a FITS header with extracted astrometry
+       or whether we are using the supplied header (for debugging purposes).
+       - in the event of failure we should flag the occurence but soldier
+       on since we need to write the data even if the FITS headers are dodgy
+       and write the original FITS header to the file.
+       The caller can then trigger the error state.
+    */
+    badfits[i] = 0;  /* assume ok */
+    astClear( lfits, "Card" );
+    wcs = NULL;
+    if (*status == SAI__OK) {
+      wcs = astRead( lfits );
+      if (*status != SAI__OK) {
+	/* copy the second (! - since we do not want the linenumber)
+	   AST message from stack into buffer */
+	emsEload( param, &parlen, errbuff, &oplen, status );
+	emsEload( param, &parlen, errbuff, &oplen, status );
+	emsAnnul( status );
+	/* get new copy to write full unmodified header */
+	lfits = astCopy( fits[i] );
+	badfits[i] = 1;
+      }
+    }
+
+    /* work out the data units from BUNIT */
+    astClear( lfits, "Card");
+    tempscal = 0;
+    if ( astGetFitsS( lfits, "BUNIT", &stemp ) ) {
+      /* take copy and decide whether this is a temperature scale (we know it is terminated) */
+      strcpy( units, stemp );
+      if (strcmp("K", stemp) == 0) tempscal = 1;
+      astDelFits( lfits );
+
+      /* and look for a TEMPSCAL fits header  - which should be undef by default and
+	 so can stay undef if we are uncalibrated. If it is missing do not fill it in. */
+      if (tempscal) {
+	astClear( lfits, "Card" );
+	if ( astFindFits( lfits, FITS_TEMPSCAL, NULL, 0 ) ) {
+	  astSetFitsS(lfits, FITS_TEMPSCAL, "TA*", "Temperature scale in use", 1);
+	}
+      }
+    } else {
+      /* not calibrated */
+      strcpy( units, "uncalibrated" );
+    }
+
+    /* Remove the END card */
+    astClear( lfits, "Card" );
+    if (astFindFits( lfits, "END", NULL, 0 ) ) {
+      astDelFits( lfits );
+    }
+
+    /* Mark some headers to be retained after stripping */
+    j = 0;
+    while ( retainfits[j] != NULL ) {
+      /* clearing each time is not very efficient but I don't want
+	 to burn in the ordering */
+      astClear( lfits, "Card" );
+      astFindFits( lfits, retainfits[j], NULL, 0 );
+      astRetainFits( lfits );
+      j++;
+    }
+
     /* subscans start counting at 1 */
     for (j = 1; j <= subsys->file.subscan ; j++ ) {
       /* need full path of file */
@@ -3028,12 +3124,10 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
 #if SPW_DEBUG_LEVEL > 0
       printf("Writing file FITS header %s\n", fname );
 #endif
-      ndfOpen( NULL, fname, "UPDATE", "OLD", &indf, &place, status );
+      if (fname != NULL) 
+	ndfOpen( NULL, fname, "UPDATE", "OLD", &indf, &place, status );
 
-      /* manipulate FITS header here...First take a copy. */
-      lfits = astCopy( fits[i] );
-
-      /* need to add a SUBSCAN number to the header */
+      /* add the SUBSCAN number to the header - forcing one if not present */
       astClear( lfits, "Card" );
       astFindFits( lfits, FITS_NSUBSCAN, NULL, 0 );
       astSetFitsI( lfits, FITS_NSUBSCAN, (int)j, "Sub-scan number", 1);
@@ -3046,58 +3140,21 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
 		   ( j == subsys->file.subscan ? 1 : 0 ),
 		   "True if file is last in current observation", 1);
 
-      /* Need to look for the BUNIT header */
-      astClear( lfits, "Card");
-      tempscal = 0;
-      if ( astGetFitsS( lfits, "BUNIT", &stemp ) ) {
-	ndfCput( stemp, indf, "UNITS", status );
-	if (strncmp("K", stemp,1) == 0) tempscal = 1;
-	astDelFits( lfits );
-      } else {
-	/* not calibrated */
-	ndfCput( "uncalibrated", indf, "UNITS", status );
-      }
+      /* Attach units to NDF */
+      ndfCput( units, indf, "UNITS", status );
 
       /* attach a data label */
       if (tempscal) {
 	/* Note the use of AST control codes for subscript/superscript */
 	ndfCput( "T%s60+%v30+A%^50+%<20+*%+   corrected antenna temperature", indf, "LABEL", status );
-	/* and look for a TEMPSCAL fits header  - which should be undef by default and
-	   so can stay undef if we are uncalibrated */
-	astClear( lfits, "Card" );
-	if ( astFindFits( lfits, FITS_TEMPSCAL, NULL, 0 ) ) {
-	  astSetFitsS(lfits, FITS_TEMPSCAL, "TA*", "Temperature scale in use", 1);
-	}
-
       } else {
 	ndfCput( "Power", indf, "LABEL", status );
-      }
-      
-      /* Remove the END card */
-      astClear( lfits, "Card" );
-      if (astFindFits( lfits, "END", NULL, 0 ) ) {
-	astDelFits( lfits );
       }
 
       /* Bounds associated with this file */
 
-      /* Mark some headers to be retained after stripping */
-      i = 0;
-      while ( retainfits[i] != NULL ) {
-	/* clearing each time is not very efficient but I don't want
-	   to burn in the ordering */
-	astClear( lfits, "Card" );
-	astFindFits( lfits, retainfits[i], NULL, 0 );
-	astRetainFits( lfits );
-	i++;
-      }
 
-      /* write astrometry */
-      /* Rewind the FitsChan */
-      astClear( lfits, "Card" );
-
-      /* extract astrometry from the FITS header */
-      wcs = astRead( lfits );
+      /* Build up the frameset from the FITS header and the time series */
 
       /* need the time information */
       ndfXloc( indf, STATEEXT, "READ", &xloc, status );
@@ -3117,6 +3174,9 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
       /* Write WCS */
       ndfPtwcs( specwcs, indf, status );
 
+      /* free the new WCS object */
+      astAnnul( specwcs );
+
       /* write FITS header */
       kpgPtfts( indf, lfits, status );
 
@@ -3128,10 +3188,6 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
 
       /* close file */
       ndfAnnul( &indf, status );
-
-      /* free the copy and other objects */
-      astAnnul( lfits );
-      astAnnul( specwcs );
 
       /* we may want to set permissions on the file to stop unwary people overwriting it
 	 or even the acquisition system itself. */
@@ -3147,6 +3203,13 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
       }
 
     }
+
+    /* free the copy of the FITS header */
+    astAnnul( lfits );
+
+    /* free the FITS header wcs */
+    if (wcs) astAnnul(wcs);
+
   }
 
 /* End the AST context. This annuls all AST Objects pointers created since
@@ -3203,7 +3266,8 @@ AstFrameSet *specWcs( const AstFrameSet *fs, int ntime, const double times[], in
 *  Parameters:
 *     fs = const AstFrameSet * (Given)
 *        A pointer to the FrameSet read from the unmodified FITS headers
-*        which define the spectral axis.
+*        which define the spectral axis. If NULL pointer, a simple channel number
+*        frame will be used for the spectral axis.
 *     ntime = int (Given)
 *        The number of time values supplied in "times".
 *     times = const double [] (Given)
@@ -3257,26 +3321,29 @@ AstFrameSet *specWcs( const AstFrameSet *fs, int ntime, const double times[], in
 /* Check each axis of the current Frame in the FrameSet read from
    the FITS headers, looking for a spectral axis. We do this using
    astIsASpecFrame since this will pick up both SpecFrames and DSBSpecFrames
-   (since a DSBSpecFrame "is a" SpecFrame). */
-   specfrm = NULL;
-   nax = astGetI( fs, "Naxes" );
-   for( iax = 1; iax <= nax; iax++ ) {
-      axis = astPickAxes( fs, 1, &iax, NULL );
-      if( astIsASpecFrame( axis ) ) {
+   (since a DSBSpecFrame "is a" SpecFrame). If we have not got an input frameset
+   we need to fudge a unitmap.
+*/
+   if (fs) {
+     specfrm = NULL;
+     nax = astGetI( fs, "Naxes" );
+     for( iax = 1; iax <= nax; iax++ ) {
+       axis = astPickAxes( fs, 1, &iax, NULL );
+       if( astIsASpecFrame( axis ) ) {
          specfrm = axis;
          iax_spec = iax;
          break;
-      }
-   }
+       }
+     }
 
 /* Report an error if no spectral axis was found in the FITS header. */
-   if( !specfrm ) {
-      if( *status == SAI__OK ) {
+     if( !specfrm ) {
+       if( *status == SAI__OK ) {
          *status = SAI__ERROR;
          emsRep( "", "No spectral axis found in FITS header", status );
          goto L999;
-      }
-   }
+       }
+     }
 
 /* We now assume that the spectral axis is connected to one and only one
    of the grid axes in the FITS header. We use astMapSplit to determine
@@ -3286,26 +3353,33 @@ AstFrameSet *specWcs( const AstFrameSet *fs, int ntime, const double times[], in
    the SpecFrame is an "output" of the Mapping represented by the FrameSet.
    After inversion of the FrameSet, the SpecFrame will be one of the
    inputs, and can therefore be picked by astMapSplit. */
-   astInvert( fs );
-   astMapSplit( fs, 1, &iax_spec, ax_out, &specmap );
+     astInvert( fs );
+     astMapSplit( fs, 1, &iax_spec, ax_out, &specmap );
 
 /* Invert the FrameSet again to return it to its original state */
-   astInvert( fs );
+     astInvert( fs );
 
 /* Report an error if the assumption made above turned out not to be
    right. */
-   if( !specmap ){
-      if( *status == SAI__OK ) {
+     if( !specmap ){
+       if( *status == SAI__OK ) {
          *status = SAI__ERROR;
          emsRep( "", "The spectral axis depends on more than one pixel axis",
                  status );
          goto L999;
-      }
-   }
+       }
+     }
 
 /* Invert "specmap" so that the forward transformation goes from grid
    coord to spectral coord. */
-   astInvert( specmap );
+     astInvert( specmap );
+
+   } else {
+     /* create simple channel number */
+     specfrm = astFrame( 1, "Domain=CHANNEL,Unit(1)=pixel,Label(1)=Channel Number" );
+     specmap = astUnitMap( 1, "" );
+
+   }
 
 /* We will use a simple Frame to describe the spatial axis, giving it the
    Domain name SPACEINDEX in order to distinguish it from the GRID Frame.
