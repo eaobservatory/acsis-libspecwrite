@@ -3062,6 +3062,18 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
     astClear( lfits, "Card" );
     wcs = NULL;
     if (*status == SAI__OK) {
+      /* Mark some headers to be retained after stripping */
+      j = 0;
+      while ( retainfits[j] != NULL ) {
+        /* clearing each time is not very efficient but I don't want
+	   to burn in the ordering */
+        astClear( lfits, "Card" );
+        if (astFindFits( lfits, retainfits[j], NULL, 0 ) ) {
+          astRetainFits( lfits );
+        }
+        j++;
+      }
+
       wcs = astRead( lfits );
       if (*status != SAI__OK) {
 	/* copy the second (! - since we do not want the linenumber)
@@ -3101,17 +3113,6 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
     astClear( lfits, "Card" );
     if (astFindFits( lfits, "END", NULL, 0 ) ) {
       astDelFits( lfits );
-    }
-
-    /* Mark some headers to be retained after stripping */
-    j = 0;
-    while ( retainfits[j] != NULL ) {
-      /* clearing each time is not very efficient but I don't want
-	 to burn in the ordering */
-      astClear( lfits, "Card" );
-      astFindFits( lfits, retainfits[j], NULL, 0 );
-      astRetainFits( lfits );
-      j++;
     }
 
     /* subscans start counting at 1 */
