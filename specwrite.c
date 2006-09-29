@@ -3074,6 +3074,8 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
         j++;
       }
 
+      /* Rewind before parsing */
+      astClear(lfits,"Card");
       wcs = astRead( lfits );
       if (*status != SAI__OK) {
 	/* copy the second (! - since we do not want the linenumber)
