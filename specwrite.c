@@ -216,7 +216,7 @@ void writeFlagFile (const obsData * obsinfo, const subSystem subsystems[],
 void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
 		      const AstFitsChan * fits[], int badfits[], char errbuff[], int * status);
 
-AstFrameSet *specWcs( const AstFrameSet *fs, int ntime, const double times[], int * status );
+AstFrameSet *specWcs( const AstFrameSet *fs, const char veldef[], int ntime, const double times[], int * status );
 
 static void checkNoFileExists( const char * file, int * status );
 
@@ -3166,8 +3166,15 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
       datMapV( tloc, "_DOUBLE", "READ", &tpntr, &tsize, status );
       tdata = tpntr;
 
+      /* when we get the spectral WCS we would like to make sure that it defaults to a velocity
+	 frame rather than frequency frame. We therefore need the DOPPLER fits header (bad name) */
+      astClear( lfits, "Card");
+      if ( !astGetFitsS( lfits, "DOPPLER", &stemp ) ) {
+	stemp[0] = '\0';
+      }
+
       /* calculate the frameset */
-      specwcs = specWcs( wcs, (int)tsize, tdata, status);
+      specwcs = specWcs( wcs, stemp, (int)tsize, tdata, status);
 
       /* clean up */
       datUnmap( tloc, status );
@@ -3241,7 +3248,7 @@ static double duration ( struct timeval * tp1, struct timeval * tp2 ) {
 #endif
 
 
-AstFrameSet *specWcs( const AstFrameSet *fs, int ntime, const double times[], int * status ){
+AstFrameSet *specWcs( const AstFrameSet *fs, const char veldef[], int ntime, const double times[], int * status ){
 
 /*
 *+
@@ -3252,7 +3259,7 @@ AstFrameSet *specWcs( const AstFrameSet *fs, int ntime, const double times[], in
 *     Calculate frameset for spectrum time series.
 
 *  Prototype:
-*     AstFrameSet *specWcs( const AstFrameSet *fs, int ntime, const double times[],
+*     AstFrameSet *specWcs( const AstFrameSet *fs, const char veldef[], int ntime, const double times[],
 *                int * status );
 
 *  Description:
@@ -3271,6 +3278,10 @@ AstFrameSet *specWcs( const AstFrameSet *fs, int ntime, const double times[], in
 *        A pointer to the FrameSet read from the unmodified FITS headers
 *        which define the spectral axis. If NULL pointer, a simple channel number
 *        frame will be used for the spectral axis.
+*     veldef = const char[] (Given)
+*        Velocity definition to which the specFrame will be converted after extraction.
+*        Can be resdhift, radio or optical. If undefined system will remain FREQ but
+*        units will be set to GHz.
 *     ntime = int (Given)
 *        The number of time values supplied in "times".
 *     times = const double [] (Given)
@@ -3431,6 +3442,20 @@ AstFrameSet *specWcs( const AstFrameSet *fs, int ntime, const double times[], in
 /* Add the total Frame into the FrameSet using the total Mapping to
    connect it to the base (i.e. GRID) Frame. */
    astAddFrame( result, AST__BASE, totmap, totfrm );
+
+   /* Adjust the system on the basis of the requested velocity definition 
+      (if we had a spec frame). Force GHz initially so that if we change
+      back to FREQ the units will be remembered. */
+   if (specfrm) {
+     astSet(result, "system(1)=FREQ,unit(1)=GHz");
+     if (strcmp(veldef, "radio") == 0) {
+       astSet(result, "system(1)=vrad");
+     } else if (strcmp(veldef, "optical") == 0) {
+       astSet(result, "system(1)=vopt");
+     } else if (strcmp(veldef, "redshift") == 0) {
+       astSet(result, "system(1)=redshift");
+     }
+   }
 
 /* Arrive here if an error occurs. Note, this is still inside the AST context
    delimited by astBegin/astEnd. */
