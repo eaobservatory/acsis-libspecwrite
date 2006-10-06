@@ -12,6 +12,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <errno.h>
+#include <math.h>
 
 /* Starlink includes */
 #include "sae_par.h"
@@ -35,6 +36,8 @@
 
 /* pi/180:  degrees to radians */
 #define DD2R 0.017453292519943295769236907684886127134428718885417
+
+#define SPD 86400.0   /* Seconds per day */
 
 /* Debug prints
    0 - disabled
@@ -3019,6 +3022,9 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
   int   parlen = 0;        /* returned length of param */
   char  param[EMS__SZPAR+1]; /* temp buffer for EMS param name */
   int   oplen  = 0;       /* returned length of errbuff */
+  char veldef[72];        /* velocity definition in use */
+  const char *skysys;         /* Sky system */
+  char receppos_sys[16];  /* Coordinate frame for RECEPPOS */
 
   /* headers to be retained */
   char * retainfits[] = {
@@ -3117,6 +3123,17 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
       astDelFits( lfits );
     }
 
+    /* Determine whether we had an AZEL or non-AZEL (TRACKING) cube. This is important for the
+       definition of RECEPPOS coordinates. Bit of a hack but it's easier (For now) than changing
+       the API or acsSpecOpenTS. */
+    strcpy(receppos_sys, "TRACKING");
+    if (wcs) {
+      skysys = astGetC( wcs, "SYSTEM(1)");
+      if (strcmp(skysys, "AZEL") == 0) {
+	strcpy(receppos_sys, "AZEL");
+      }
+    }
+
     /* subscans start counting at 1 */
     for (j = 1; j <= subsys->file.subscan ; j++ ) {
       /* need full path of file */
@@ -3169,12 +3186,13 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
       /* when we get the spectral WCS we would like to make sure that it defaults to a velocity
 	 frame rather than frequency frame. We therefore need the DOPPLER fits header (bad name) */
       astClear( lfits, "Card");
-      if ( !astGetFitsS( lfits, "DOPPLER", &stemp ) ) {
-	stemp[0] = '\0';
+      veldef[0] = '\0';
+      if ( astGetFitsS( lfits, "DOPPLER", &stemp ) ) {
+	strcpy( veldef, stemp );
       }
 
       /* calculate the frameset */
-      specwcs = specWcs( wcs, stemp, (int)tsize, tdata, status);
+      specwcs = specWcs( wcs, veldef, (int)tsize, tdata, status);
 
       /* clean up */
       datUnmap( tloc, status );
@@ -3195,6 +3213,9 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
 	 wants to write a new entry every time the file is opened for UPDATE. */
       ndfHput("NORMAL",APPNAME, 1, 1, history,
 	      0, 0, 0, indf, status );
+
+      /* Need ACSIS extension for hack */
+      ndfXpt0c( receppos_sys, indf, ACSISEXT, "RECEPPOS_SYS", status );
 
       /* close file */
       ndfAnnul( &indf, status );
@@ -3320,8 +3341,9 @@ AstFrameSet *specWcs( const AstFrameSet *fs, const char veldef[], int ntime, con
    AstTimeFrame *timefrm;
    AstUnitMap *spacemap;
    double tcopy[2];  /* local copy of time lut for when only 1 number present */
-   const double *ltimes;  /* pointer to a time array */
+   double *ltimes;  /* pointer to a time array */
    int nax, iax, iax_spec, ax_out[ NDF__MXDIM ];
+   int malloced = 0; /* did we malloc a ltimes array */
 
 /* Initialise. */
    result = NULL;
@@ -3392,7 +3414,6 @@ AstFrameSet *specWcs( const AstFrameSet *fs, const char veldef[], int ntime, con
      /* create simple channel number */
      specfrm = astFrame( 1, "Domain=CHANNEL,Unit(1)=pixel,Label(1)=Channel Number" );
      specmap = astUnitMap( 1, "" );
-
    }
 
 /* We will use a simple Frame to describe the spatial axis, giving it the
@@ -3405,11 +3426,12 @@ AstFrameSet *specWcs( const AstFrameSet *fs, const char veldef[], int ntime, con
 /* We now have the SpecFrame, and the Mapping from grid coord to spectral
    coord. Now create a TimeFrame to describe MJD in the TAI timescale, and
    a LutMap which transforms grid coord into MJD (in days). The default
-   TimeFrame attribute values give us what we want. Although we 
-   can set the formatting to 2 decimal places (seconds) since we know that
-   ACSIS will never read out faster than 50 ms.
+   TimeFrame attribute values give us what we want. 
+   Work out the duration of the observation to decide on formatting.
+   To give AST some help with formatting axes we use a TimeOrigin.
 */
    timefrm = astTimeFrame( "" );
+   malloced = 0;
    if (ntime == 1) {
      /* a LutMap needs to numbers in its mapping so double up the
 	first time if we only have one value. */
@@ -3418,9 +3440,30 @@ AstFrameSet *specWcs( const AstFrameSet *fs, const char veldef[], int ntime, con
      ltimes = tcopy;
      ntime = 2;
    } else {
-     ltimes = times;
+     double origin = 0.0; /* reference time */
+     int i;
+     /* copy values and remove integer part of day */
+     ltimes = starMalloc( sizeof(*ltimes) * ntime );
+     if (ltimes) malloced = 1;
+     origin = floor( times[0] );
+     for (i = 0; i < ntime; i++ ) {
+       ltimes[i] = times[i] - origin;
+     }
+     astSetD(timefrm, "TimeOrigin", origin);
+
+     /* We would like to use iso.0 for anything that is longer than 10 seconds (say)
+       else use iso.2 because ACSIS can not take spectra faster than 0.05 second. */
+     printf("Delta=%f\n",(ltimes[ntime-1]-ltimes[0]));
+     if ( (ltimes[ntime-1] - ltimes[0]) < (10.0 / SPD) ) {
+       astSet(timefrm, "format=iso.2");
+     } else {
+       astSet(timefrm, "format=iso.0");
+     }
+
    }
    timemap = astLutMap( ntime, ltimes, 1.0, 1.0, "" );
+
+   if (malloced) starFree( ltimes );
 
 /* We now have the Frames and Mappings describing all the individual
    axes. Join all the Frames together into a CmpFrame (in the order spectral,
@@ -3446,7 +3489,7 @@ AstFrameSet *specWcs( const AstFrameSet *fs, const char veldef[], int ntime, con
    /* Adjust the system on the basis of the requested velocity definition 
       (if we had a spec frame). Force GHz initially so that if we change
       back to FREQ the units will be remembered. */
-   if (specfrm) {
+   if (specfrm && astIsASpecFrame( specfrm )) {
      astSet(result, "system(1)=FREQ,unit(1)=GHz");
      if (strcmp(veldef, "radio") == 0) {
        astSet(result, "system(1)=vrad");
