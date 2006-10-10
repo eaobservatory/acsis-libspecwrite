@@ -717,6 +717,8 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 *        when all spectra for a sequence have arrived.
 *     11-MAY-2006 (TIMJ):
 *        Remove Freq argument.
+*     09-OCT-2006 (TIMJ):
+*        Do need chop information
 
 *  Notes:
 *     - Must have previously called acsSpecOpenTS.
@@ -823,15 +825,6 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 
   /* first need to take a local copy for editing */
   memcpy( &state, record, sizeof(ACSISRtsState) );
-
-  /* Some elements are compatibility elements for SCUBA-2 and should be
-     cleared here so that ACSIS does not have to worry about them */
-  strcpy( state.smu_chop_phase, " " );
-  strcpy( state.tcs_beam, " " );
-  state.smu_az_chop_x = VAL__BADD;
-  state.smu_az_chop_y = VAL__BADD;
-  state.smu_tr_chop_x = VAL__BADD;
-  state.smu_tr_chop_y = VAL__BADD;
 
   /* also convert the feed coordinates from degrees to radians */
   state.acs_feedx *= DD2R;
