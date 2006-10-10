@@ -33,6 +33,8 @@
 *        spectrum was treated as a science or calibration spectrum.
 *     26-JUL-2006 (TIMJ):
 *        acsSpecOpenTS now gets focal plane information.
+*     09-OCT-2006 (TIMJ):
+*        Add TCS_TAI
 
 *  Copyright:
 *     Copyright (C) 2006 Particle Physics and Astronomy Research Council.
@@ -89,6 +91,7 @@ typedef struct ACSISRtsState {
   double smu_tr_jig_y;
   double smu_tr_chop_x;
   double smu_tr_chop_y;
+  double tcs_tai;
   double tcs_airmass;
   double tcs_az_ang;
   double tcs_az_ac1;
