@@ -126,6 +126,7 @@ typedef struct ACSISRtsState {
   int    acs_no_ons;
   float  acs_exposure;
   char   acs_source_ro[SIZEOF_ACS_SOURCE_RO+1];
+  double fe_lofreq;
 } ACSISRtsState;
 
 
