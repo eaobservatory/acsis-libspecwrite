@@ -50,7 +50,7 @@
 #define MAXFILE 1024
 
 /* Define the number of extensions we support */
-#define NEXTENSIONS 45
+#define NEXTENSIONS 46
 
 /* Maximum number of subsystems we can handle 
    We know that ACSIS can have at most 4 spectral subsystems
@@ -293,27 +293,28 @@ static int kpgPtfts( int indf, const AstFitsChan * fchan, int * status );
 #define TCS_AZ_DC2       21
 #define TCS_AZ_BC1       22
 #define TCS_AZ_BC2       23
-#define TCS_BEAM         24
-#define TCS_INDEX        25
-#define TCS_SOURCE       26
-#define TCS_TR_SYS       27
-#define TCS_TR_ANG       28
-#define TCS_TR_AC1       29
-#define TCS_TR_AC2       30
-#define TCS_TR_DC1       31
-#define TCS_TR_DC2       32
-#define TCS_TR_BC1       33
-#define TCS_TR_BC2       34
-#define JOS_DRCONTROL    35
-#define ENVIRO_REL_HUM   36
-#define ENVIRO_PRESSURE  37
-#define ENVIRO_AIR_TEMP  38
-#define POL_ANG          39
-#define ACS_SOURCE_RO    40
-#define ACS_NO_PREV_REF  41
-#define ACS_NO_NEXT_REF  42
-#define ACS_NO_ONS       43
-#define ACS_EXPOSURE     44
+#define TCS_TAI          24
+#define TCS_BEAM         25
+#define TCS_INDEX        26
+#define TCS_SOURCE       27
+#define TCS_TR_SYS       28
+#define TCS_TR_ANG       29
+#define TCS_TR_AC1       30
+#define TCS_TR_AC2       31
+#define TCS_TR_DC1       32
+#define TCS_TR_DC2       33
+#define TCS_TR_BC1       34
+#define TCS_TR_BC2       35
+#define JOS_DRCONTROL    36
+#define ENVIRO_REL_HUM   37
+#define ENVIRO_PRESSURE  38
+#define ENVIRO_AIR_TEMP  39
+#define POL_ANG          40
+#define ACS_SOURCE_RO    41
+#define ACS_NO_PREV_REF  42
+#define ACS_NO_NEXT_REF  43
+#define ACS_NO_ONS       44
+#define ACS_EXPOSURE     45
 
 /* Definitions of HDS types associated with ACSISRtsStates struct. All these
    will be created in the file. */
@@ -335,6 +336,7 @@ static const char * hdsRecordNames[NEXTENSIONS][2] =
    { "_DOUBLE", "SMU_TR_JIG_Y" },
    { "_DOUBLE", "SMU_TR_CHOP_X" },
    { "_DOUBLE", "SMU_TR_CHOP_Y" },
+   { "_DOUBLE", "TCS_TAI" },
    { "_DOUBLE", "TCS_AIRMASS" },
    { "_DOUBLE", "TCS_AZ_ANG" },
    { "_DOUBLE", "TCS_AZ_AC1" },
@@ -1853,6 +1855,7 @@ static void writeRecord( void * basepntr[], unsigned int frame,
   ((double *)basepntr[SMU_TR_CHOP_Y])[frame] = record->smu_tr_chop_y;
 
   /* Telescope Control System */
+  ((double *)basepntr[TCS_TAI])[frame] = record->tcs_tai;
   ((double *)basepntr[TCS_AIRMASS])[frame] = record->tcs_airmass;
   ((double *)basepntr[TCS_AZ_ANG])[frame] = record->tcs_az_ang;
   ((double *)basepntr[TCS_AZ_AC1])[frame] = record->tcs_az_ac1;
