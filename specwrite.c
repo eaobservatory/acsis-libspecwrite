@@ -366,7 +366,7 @@ static const char * hdsRecordNames[NEXTENSIONS][2] =
    { "_INTEGER", "ACS_NO_PREV_REF" },
    { "_INTEGER", "ACS_NO_NEXT_REF" },
    { "_INTEGER", "ACS_NO_ONS" },
-   { "_REAL", "ACS_EXPOSURE" }
+   { "_REAL", "ACS_EXPOSURE" },
    { "_DOUBLE", "FE_LOFREQ" }
   };
 
