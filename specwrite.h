@@ -35,6 +35,8 @@
 *        acsSpecOpenTS now gets focal plane information.
 *     09-OCT-2006 (TIMJ):
 *        Add TCS_TAI
+*     11-OCT-2006 (TIMJ):
+*        Add FE_LOFREQ and FE_DOPPLER
 
 *  Copyright:
 *     Copyright (C) 2006 Particle Physics and Astronomy Research Council.
@@ -127,6 +129,7 @@ typedef struct ACSISRtsState {
   float  acs_exposure;
   char   acs_source_ro[SIZEOF_ACS_SOURCE_RO+1];
   double fe_lofreq;
+  double fe_doppler;
 } ACSISRtsState;
 
 

@@ -50,7 +50,7 @@
 #define MAXFILE 1024
 
 /* Define the number of extensions we support */
-#define NEXTENSIONS 47
+#define NEXTENSIONS 48
 
 /* Maximum number of subsystems we can handle 
    We know that ACSIS can have at most 4 spectral subsystems
@@ -316,6 +316,7 @@ static int kpgPtfts( int indf, const AstFitsChan * fchan, int * status );
 #define ACS_NO_ONS       44
 #define ACS_EXPOSURE     45
 #define FE_LOFREQ        46
+#define FE_DOPPLER       47
 
 /* Definitions of HDS types associated with ACSISRtsStates struct. All these
    will be created in the file. */
@@ -367,7 +368,8 @@ static const char * hdsRecordNames[NEXTENSIONS][2] =
    { "_INTEGER", "ACS_NO_NEXT_REF" },
    { "_INTEGER", "ACS_NO_ONS" },
    { "_REAL", "ACS_EXPOSURE" },
-   { "_DOUBLE", "FE_LOFREQ" }
+   { "_DOUBLE", "FE_LOFREQ" },
+   { "_DOUBLE", "FE_DOPPLER" }
   };
 
 /* Somewhere to store the precomputed sizes of each HDS element */
@@ -1906,6 +1908,7 @@ static void writeRecord( void * basepntr[], unsigned int frame,
 
   /* Frontend */
   ((double *)basepntr[FE_LOFREQ])[frame] = record->fe_lofreq;
+  ((double *)basepntr[FE_DOPPLER])[frame] = record->fe_doppler;
 
 }
 
