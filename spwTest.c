@@ -164,7 +164,10 @@ main ( void ) {
   step_time_in_days = rts_step / SPD;
   /*  step_time_in_days = 0.5;*/
   record.rts_end  = 53797.0;
+  record.tcs_tai = 53797.5;
   strcpy(record.rts_tasks, "SIMULATOR");
+  *(record.tcs_beam) = 'M';
+  *(record.smu_chop_phase) = 'M';
   record.acs_tsys = 52.8;
   record.acs_trx = 256.7;
   *(record.tcs_source) = '\0';
@@ -174,6 +177,8 @@ main ( void ) {
   record.acs_no_next_ref = 1;
   record.acs_no_ons = 1;
   record.acs_exposure = 1.0 / DUMPRATE;
+  record.fe_lofreq = 245.6;
+  record.fe_doppler = 1.0;
 
   /* Open NDF */
   for (i = 0; i < nsubsys; i++) {
