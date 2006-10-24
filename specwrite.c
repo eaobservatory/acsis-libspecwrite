@@ -2639,6 +2639,11 @@ static void freeResources ( obsData * obsinfo, subSystem * subsys, int * status)
     subsys->tdata.count = NULL;
   }
 
+  if (subsys->tdata.fullSlots != NULL) {
+    starFree( subsys->tdata.fullSlots );
+    subsys->tdata.fullSlots = NULL;
+  }
+
   if (obsinfo->recep_name_buff != NULL) {
     starFree( obsinfo->recep_name_buff );
     obsinfo->recep_name_buff = NULL;
