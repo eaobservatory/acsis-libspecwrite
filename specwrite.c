@@ -93,6 +93,9 @@ typedef struct specData {
   unsigned char * count;    /* array of size (nrecep x nseq) containing 1 if spectrum written
                                else 0. Can be used to indicate when all spectra received
                                or if overwriting a spectrum. */
+  unsigned char * fullSlots; /* Array of size nseq indicating when all spectra received for slot (1) or not (0)
+			      Related to count() */
+  unsigned int firstFreeSlot;  /* position in fillSeq where first 0 appears */
 } specData;
 
 /* This struct contains file information (ndf identifiers, hds locators) */
@@ -210,7 +213,9 @@ static void myRealloc( void **pntr, size_t nbytes, int * status );
 
 static int hasAllSpectra( const obsData * obsinfo, const subSystem * subsys,
 			  int * status );
-static int hasSeqSpectra( const obsData * obsinfo, const subSystem * subsys,
+static int hasAllSpectraCareful( const obsData * obsinfo, const subSystem * subsys,
+			  int * status );
+static int hasSeqSpectra( const obsData * obsinfo, subSystem * subsys,
 			  unsigned int tindex, int * status );
 
 void writeFlagFile (const obsData * obsinfo, const subSystem subsystems[],
@@ -422,10 +427,6 @@ static size_t hdsRecordSizes[NEXTENSIONS];
           MAXBYTES / (4 * 1024 * 1       ) = 130,000 sequences
  */
 #define MAXSEQ ( MAXBYTES / ( 4 * 1024 * 1 ) )
-
-/* maximum number of sequence steps we can get out of sequence */
-#define MAXSEQERR  5
-
 
 /*
 *+
@@ -888,6 +889,20 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
       memset( subsys->tdata.count, 0, OBSINFO.nrecep * subsys->maxsize * sizeof(unsigned char) );
     }
 
+    /* Allocate the fullSlots array */
+    subsys->tdata.fullSlots = starMalloc( subsys->maxsize * sizeof(unsigned char) );
+    if (subsys->tdata.fullSlots == NULL) {
+      if (*status == SAI__OK) {
+	*status = SAI__ERROR;
+	emsRep(" ","Unable to allocate memory for fullSlots array", status );
+      }
+    } else {
+      memset( subsys->tdata.fullSlots, 0, subsys->maxsize * sizeof(unsigned char) );
+    }
+
+    /* initialise the first free slot */
+    subsys->tdata.firstFreeSlot = 0;
+
   } else if ( subsys->nchans != nchans ) {
     *status = SAI__ERROR;
     emsSetu( "IN", nchans );
@@ -930,13 +945,12 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
       /* pointer to array of rts sequence numbers */
       rtsseqs = (subsys->tdata.jcmtstate)[RTS_NUM];
 
-      /* search back through the list */
-      /* For efficiency, assume that we can't be more than a certain
-	 number of sequence steps behind. */
-      max_behind = ( subsys->curpos < MAXSEQERR ? subsys->curpos : MAXSEQERR );
+      /* search back through the list up to the firstFreeSlot position (we know that
+       before that point all spectra for all sequences have arrived) */
+      max_behind = subsys->curpos - subsys->tdata.firstFreeSlot;
       startind = subsys->curpos;
       found = 0;
-      for (i = 1; i < max_behind; i++) {
+      for (i = 1; i <= max_behind; i++) {
 	if (state.rts_num == rtsseqs[startind-i]) {
 	  /* found the sequence */
 	  tindex = startind - i;
@@ -1078,8 +1092,8 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 
 #if SPW_DEBUG_LEVEL > 0
     if (seqinc) {
-      printf(">>> About to write first spectrum at position %u for sequence %u\n", tindex,
-	     subsys->curseq);
+      printf(">>> About to write first spectrum at position %u for sequence %u (feed=%d)\n", tindex,
+	     subsys->curseq, state.acs_feed);
     }
 #endif
     /* Calculate offset into array - number of spectra into the array times number of
@@ -2821,14 +2835,18 @@ static size_t sizeofHDSType( const char * type, int * status ) {
 
 }
 
- /* See whether the "count" array has all slots filled for this time slice */
+ /* See whether the "count" array has all slots filled for this time slice.
+    If it does, set the fullSlots flag to 1 and work out the new highest fill mark.
+ */
 
-static int hasSeqSpectra( const obsData * obsinfo, const subSystem * subsys,
+static int hasSeqSpectra( const obsData * obsinfo, subSystem * subsys,
 			  unsigned int tindex, int * status ) {
 
   unsigned int offset; /* offset into count data array */
   unsigned int i;    /* loop counter */
   int missing = 0; /* true if we found a missing spectrum */
+  int found = 0; /* true if we found a free slot */
+  unsigned int curslot = 0; /* cache of current free slot index */
 
   if (*status != SAI__OK) return 0;
 
@@ -2843,14 +2861,68 @@ static int hasSeqSpectra( const obsData * obsinfo, const subSystem * subsys,
     }
   }
 
+  /* If the slot is full and if the fullSlots array was previously false for this position,
+     update the fullSlots array and check to see if the fill level has changed */
+  if (!missing && !((subsys->tdata.fullSlots)[tindex])) {
+    (subsys->tdata.fullSlots)[tindex] = 1;
+
+    /* Since it will have been possible to fill later slots than tindex
+       we need to now read forward from fitsFreeSlot to the end of the array
+       until we find a new free slot */
+    found = 0;
+    curslot = subsys->tdata.firstFreeSlot;
+    for (i = subsys->tdata.firstFreeSlot; i < subsys->cursize; i++) {
+      if ( (subsys->tdata.fullSlots)[i] == 0 ) {
+	/* empty slot so update firstFreeSlot and break from loop. This could be
+	   the same empty slot as we had already.*/
+	subsys->tdata.firstFreeSlot = i;
+	found = 1;
+#if SPW_DEBUG_LEVEL > 0
+	if (curslot != i)
+	  printf("Update free slot number to %u\n", subsys->tdata.firstFreeSlot);
+#endif
+	break;
+      } else {
+	/* full slot so keep looking */
+      }      
+    }
+    if (!found) {
+      /* looks like all is full */
+      subsys->tdata.firstFreeSlot = subsys->cursize;
+#if SPW_DEBUG_LEVEL > 0
+      printf("All sequence slots filled to cursize\n");
+#endif
+
+    }
+  }
+
   /* return true is missing is false */
   return ( missing ? 0 : 1 );
 }
 
 /* See whether all spectra have been received for all sequences
-   received so far. */
+   received so far. This can be achieved simply by comparing curpos with
+   firstFreeSlot and is fast so long as hasSeqSpectra is called each time a spectrum
+   is stored.
+*/
 
 static int hasAllSpectra( const obsData * obsinfo, const subSystem * subsys,
+			  int * status ) {
+
+  if ( subsys->curpos == (subsys->tdata.firstFreeSlot - 1) ) {
+    return 1;
+  } else {
+    return 0;
+  }
+}
+
+/* See whether all spectra have been received for all sequences
+   received so far.  This is the careful method that looks at every entry in "count"
+   explcitly.
+
+*/
+
+static int hasAllSpectraCareful( const obsData * obsinfo, const subSystem * subsys,
 			  int * status ) {
   unsigned int last; /* end position into count data array */
   unsigned int i;    /* loop counter */
