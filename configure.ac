@@ -27,7 +27,7 @@ dnl    Check if sys/wait.h exists and is POSIX compatible
 AC_HEADER_STDC
 
 dnl    Library functions
-AC_CHECK_FUNCS([mkstemp mkstemps])
+AC_CHECK_FUNCS([mkstemp mkstemps srandomdev])
 
 dnl    Variable sizes
 AC_CHECK_SIZEOF(float)
