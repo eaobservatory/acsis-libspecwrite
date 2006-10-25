@@ -52,6 +52,10 @@
 #include <sys/time.h>
 #include <limits.h>
 
+#ifndef RAND_MAX
+#define RAND_MAX INT_MAX
+#endif
+
 /* Starlink includes */
 #include "ast.h"
 #include "ndf.h"
@@ -156,9 +160,9 @@ main ( void ) {
   }
 
   /* Create header - obtain from test file */
-  // ndfFind( NULL, "testhdr", &indf, &status );
+  ndfFind( NULL, "testhdr", &indf, &status );
   // ndfFind( NULL, "a20060920_00001_00_0001", &indf, &status );
-  ndfFind( NULL, "ac20061004_00071_01_01", &indf, &status );
+  //ndfFind( NULL, "ac20061004_00071_01_01", &indf, &status );
   // ndfFind( NULL, "omc1_small", &indf, &status );
   kpgGtfts( indf, &fitschan, &status );
   ndfAnnul( &indf, &status );
@@ -203,12 +207,14 @@ main ( void ) {
   memset( lut, 0, NRECEP*NSEQ );
 
   /* go through and extract FRAC % of lut */
+#if HAVE_SRANDOMDEV
   srandomdev();
+#endif
   for (i=0; i < (int)(FRAC*NRECEP*NSEQ); i++) {
     if (status != SAI__OK) break;
     long rnd;
     while ( 1 ) {
-      double frac = (double)random() / (double)INT_MAX;
+      double frac = (double)random() / (double)RAND_MAX;
       double drnd = (double)(NSEQ * NRECEP) * frac;
       rnd = (int)drnd;
       if (lut[rnd] == 0 ) break; /* 0 means we have not sent it */
@@ -229,6 +235,7 @@ main ( void ) {
       printf("Sending seq %u feed %d\n", seq, feed);
       writeSpectrum( spectrum, nsubsys, &record, nchans, feed, &c, seq, rts_step, &status );
     }
+
   }
 
   /* Now close up */
