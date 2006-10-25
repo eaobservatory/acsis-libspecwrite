@@ -44,7 +44,7 @@
    1 - standard debug 
    2 - verbose debug
  */
-#define SPW_DEBUG_LEVEL 0
+#define SPW_DEBUG_LEVEL 1
 
 /* Largest file name allowed (including path) */
 #define MAXFILE 1024
@@ -929,24 +929,31 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
        large enough) */
     seqinc = 1;
     tindex = 0;
-    /* printf("First spectrum for this file for this subsystem\n"); */
-
+#if SPW_DEBUG_LEVEL > 1
+    printf("First spectrum for this file for this subsystem\n");
+#endif
   } else {
     /* if the supplied value is the most recent value then we do not 
-       need to search */
+       need to search. Note that curseq does not actually refer to curpos
+       so this optimization is not that helpful since we have to check
+       in RTS_NUM array anyway.
+    */
+    /* pointer to array of rts sequence numbers */
+    rtsseqs = (subsys->tdata.jcmtstate)[RTS_NUM];
 
-    if (state.rts_num == subsys->curseq) {
-
+    if ((state.rts_num == subsys->curseq) &&
+	(state.rts_num == rtsseqs[subsys->curpos])) {
+      /* may as well do the actual for search and stop immediately */
       tindex = subsys->curpos - 1;
-      /* printf("Reusing sequence %u at index %u\n", subsys->curseq, tindex); */
-
+#if SPW_DEBUG_LEVEL > 1      
+      printf("Reusing sequence %u at index %u\n", subsys->curseq, tindex);
+#endif
     } else {
 
-      /* pointer to array of rts sequence numbers */
-      rtsseqs = (subsys->tdata.jcmtstate)[RTS_NUM];
-
       /* search back through the list up to the firstFreeSlot position (we know that
-       before that point all spectra for all sequences have arrived) */
+       before that point all spectra for all sequences have arrived). Be careful to 
+      use i++ since the obvious test and decrementing to firstFreeSlot fails when
+      the index goes negative and is treated as a positive number. */
       max_behind = subsys->curpos - subsys->tdata.firstFreeSlot;
       startind = subsys->curpos;
       found = 0;
@@ -967,10 +974,10 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 	tindex = subsys->curpos; /* curpos will be incremented */
 	seqinc = 1;
       } else {
-	/* going back in time so this may not be efficient */
+	/* found it earlier in the file */
 #if SPW_DEBUG_LEVEL > 1
-	printf("Sequence %u matches index %u. Previous seq num=%u\n", 
-	       state.rts_num, tindex, subsys->curseq);
+	printf("Sequence %u matches index %d. Previous seq num=%u\n", 
+	       state.rts_num, (int)tindex, subsys->curseq);
 #endif
 	subsys->curseq = state.rts_num;
 
@@ -1123,6 +1130,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 	emsSetu("CURSEQ", subsys->curseq );
 	emsSetu("PREVSEQ", last_seqnum);
 	emsSetu("FEED", state.acs_feed );
+	emsSetu("T", tindex);
 	if ( (subsys->tdata.count)[coff] == 1 ) {
 	  emsRep(" ", "acsSpecWriteTS: Error. Overwriting a slot that already contains a spectrum"
 		 " (current sequence number = ^CURSEQ, previous sequence was ^PREVSEQ,"
@@ -1130,7 +1138,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 	} else {
 	  emsSetu("NWRITE", (unsigned int)(subsys->tdata.count)[coff]);
 	  emsRep( " ","acsSpecWriteTS: Error. Bizarrely have already written ^NWRITE"
-		  " spectra to this slot (current sequence number = ^CURSEQ, feed = ^FEED)",
+		  " spectra to slot ^T (current sequence number = ^CURSEQ, feed = ^FEED)",
 		  status);
 	}
       }
@@ -1143,8 +1151,10 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 	*status = SAI__ERROR;
 	emsSetu( "LAST", last_seqnum );
 	emsSetu( "CUR", subsys->curseq);
-	emsRep(" ","Last time this slot was used it had sequence number ^LAST"
-	       " but now it has value ^CUR.", status);
+	emsSetu( "T", tindex);
+	emsSetu("FEED", state.acs_feed);
+	emsRep(" ","Last time slot ^T was used it had sequence number ^LAST"
+	       " but now it has value ^CUR (current feed ^FEED).", status);
       }
     }
 
@@ -1365,7 +1375,7 @@ acsSpecCloseTS( const AstFitsChan * fits[], int incArchiveBounds, int * status )
      any FITS headers.
   */
 
-#if SPW_DEBUG_LEVEL > 1
+#if SPW_DEBUG_LEVEL > 2
   astShow( fits[0] );
 #endif
 
