@@ -44,7 +44,7 @@
    1 - standard debug 
    2 - verbose debug
  */
-#define SPW_DEBUG_LEVEL 1
+#define SPW_DEBUG_LEVEL 0
 
 /* Largest file name allowed (including path) */
 #define MAXFILE 1024
@@ -957,12 +957,24 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
       max_behind = subsys->curpos - subsys->tdata.firstFreeSlot;
       startind = subsys->curpos;
       found = 0;
-      for (i = 1; i <= max_behind; i++) {
-	if (state.rts_num == rtsseqs[startind-i]) {
-	  /* found the sequence */
-	  tindex = startind - i;
-	  found = 1;
-	  break;
+
+      /* sanity check for bad firstFreeSlot */
+      if (*status == SAI__OK) {
+	if (max_behind <= startind) {
+	  for (i = 1; i <= max_behind; i++) {
+	    if (state.rts_num == rtsseqs[startind-i]) {
+	      /* found the sequence */
+	      tindex = startind - i;
+	      found = 1;
+	      break;
+	    }
+	  }
+	} else {
+	  *status = SAI__ERROR;
+	  emsSetu("FS", subsys->tdata.firstFreeSlot);
+	  emsSetu("CP", subsys->curpos);
+	  emsRep( " ", "acsSpecWriteTS: Internal integrity failure. First free slot"
+		  " (^FS) is greater than current buffer size (^CP)!", status );
 	}
       }
 
@@ -2500,10 +2512,16 @@ allocResources( const obsData * obsinfo, subSystem * subsys, unsigned int nseq, 
   openNDF( obsinfo, subsys, subsys, nseq, status );
 #endif
 
-  /* count array is always in memory */
+  /* count arrays are always in memory */
   nbytes = obsinfo->nrecep * seq * sizeof( unsigned char );
   myRealloc( (void**)&(subsys->tdata.count), nbytes, status );
   if (*status == SAI__OK) memset( subsys->tdata.count, 0, nbytes );
+
+  nbytes = seq * sizeof( unsigned char );
+  myRealloc( (void**)&(subsys->tdata.fullSlots), nbytes, status );
+  if (*status == SAI__OK) memset( subsys->tdata.fullSlots, 0, nbytes );
+
+  subsys->tdata.firstFreeSlot = 0;
 
   /* Record the new size */
   subsys->cursize = seq;
@@ -2600,6 +2618,7 @@ flushResources( const obsData * obsinfo, subSystem * subsys, int * status ) {
   /* New position in buffer is the beginning */
   subsys->curpos = 0;
   subsys->curseq = 0;
+  subsys->tdata.firstFreeSlot = 0;
 
   /* indicate that we need to clear this resource */
   subsys->alloced = 0;
@@ -2653,6 +2672,7 @@ static void freeResources ( obsData * obsinfo, subSystem * subsys, int * status)
     starFree( subsys->tdata.fullSlots );
     subsys->tdata.fullSlots = NULL;
   }
+  subsys->tdata.firstFreeSlot = 0;
 
   if (obsinfo->recep_name_buff != NULL) {
     starFree( obsinfo->recep_name_buff );
