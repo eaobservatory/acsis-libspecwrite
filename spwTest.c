@@ -50,6 +50,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
+#include <limits.h>
 
 /* Starlink includes */
 #include "ast.h"
@@ -79,6 +80,9 @@
 #define NSEQ  (int)( (float)OBSLENGTH * (float)DUMPRATE )
 #define SEQLEN 10
 #define NSPEC ( NSEQ * NRECEP * NSUBSYS )
+
+/* Fraction of random lut to extract */
+#define FRAC 0.5
 
 /* data rate in MBps */
 #define DATARATE ( DUMPRATE * NRECEP * NSUBSYS * NCHAN * 4 / (1024 * 1024) )
@@ -112,6 +116,10 @@ const float fplaney[] = { -1.0f,2.0f,3.0f,4.0f,5.0f,6.0f,7.6f,8.2f,
 /* Prototypes */
 static int kpgGtfts( int indf, AstFitsChan ** fchan, int * status );
 static double duration ( struct timeval * tp1, struct timeval * tp2, int * status );
+static void writeSpectrum( const float * spectrum, unsigned int nsubsys, ACSISRtsState *record,
+			   size_t nchans[],
+			   int feed, unsigned int * count, unsigned int lseq, double step_time,
+			   int * status );
 
 void MAIN_ ( void );
 void MAIN_ ( void ) { };
@@ -123,21 +131,20 @@ main ( void ) {
   AstFitsChan * fitschan = NULL;
   AstFitsChan * fits[NSUBSYS];
   int status = SAI__OK;
-  int i,j;
+  int i;
   float spectrum[NCHAN];
-  float spectrum2[NCHAN];
   size_t nchans[NSUBSYS];
+  char lut[NRECEP*NSEQ];
   ACSISRtsState record;
-  double step_time_in_days;
   struct timeval tp1;
   struct timeval tp2;
   double diff;
   unsigned int c;
   unsigned int seq;
   int exstat;
-  unsigned int lseq;
   const double rts_step = 1.0 / DUMPRATE;
   int indf;
+  int feed;
 
   emsBegin( &status );
 
@@ -149,7 +156,10 @@ main ( void ) {
   }
 
   /* Create header - obtain from test file */
-  ndfFind( NULL, "testhdr", &indf, &status );
+  // ndfFind( NULL, "testhdr", &indf, &status );
+  // ndfFind( NULL, "a20060920_00001_00_0001", &indf, &status );
+  ndfFind( NULL, "ac20061004_00071_01_01", &indf, &status );
+  // ndfFind( NULL, "omc1_small", &indf, &status );
   kpgGtfts( indf, &fitschan, &status );
   ndfAnnul( &indf, &status );
 
@@ -161,13 +171,9 @@ main ( void ) {
   /* intialise the record */
   record.pol_ang = 3.14159;
   record.rts_num = 0;
-  step_time_in_days = rts_step / SPD;
-  /*  step_time_in_days = 0.5;*/
-  record.rts_end  = 53797.0;
-  record.tcs_tai = 53797.5;
   strcpy(record.rts_tasks, "SIMULATOR");
-  *(record.tcs_beam) = 'M';
-  *(record.smu_chop_phase) = 'M';
+  *(record.tcs_beam) = '\0';
+  *(record.smu_chop_phase) = '\0';
   record.acs_tsys = 52.8;
   record.acs_trx = 256.7;
   *(record.tcs_source) = '\0';
@@ -179,6 +185,8 @@ main ( void ) {
   record.acs_exposure = 1.0 / DUMPRATE;
   record.fe_lofreq = 245.6;
   record.fe_doppler = 1.0;
+  record.acs_feedx = 1.0;
+  record.acs_feedy = 2.0;
 
   /* Open NDF */
   for (i = 0; i < nsubsys; i++) {
@@ -190,40 +198,40 @@ main ( void ) {
 		 focal_station, fplanex, fplaney, &status);
   c = 0;
   record.rts_endnum = 0;
-  for (seq = 0; seq < NSEQ; seq++) {
-    lseq = seq;
 
-    /* Increment sequence number in record */
-    record.rts_num = lseq + 1;
+  /* Initialise lut to zeroes */
+  memset( lut, 0, NRECEP*NSEQ );
 
-    /* assume new sequence every 10th step */
-    if ( lseq % SEQLEN == 0) record.rts_endnum += SEQLEN;
+  /* go through and extract FRAC % of lut */
+  srandomdev();
+  for (i=0; i < (int)(FRAC*NRECEP*NSEQ); i++) {
+    if (status != SAI__OK) break;
+    long rnd;
+    while ( 1 ) {
+      double frac = (double)random() / (double)INT_MAX;
+      double drnd = (double)(NSEQ * NRECEP) * frac;
+      rnd = (int)drnd;
+      if (lut[rnd] == 0 ) break; /* 0 means we have not sent it */
+    }
+    feed = rnd % NRECEP;
+    seq = rnd / NRECEP;
+    printf("---------------Sending random seq %u feed %d\n", seq, feed);
+    writeSpectrum( spectrum, nsubsys, &record, nchans, feed, &c, seq, rts_step, &status );
+    lut[rnd]++;
+  }
 
-    record.rts_end += step_time_in_days;
-    for (i = 0; i < NRECEP; i++) {
-      record.acs_feed = i;
-      record.acs_feedx = 1.0;
-      record.acs_feedy = 2.0;
-
-      /* tweak content */
-      for (j=0; j < NCHAN; j++) {
-	spectrum2[j] = spectrum[j] + (float)i;
-      }
-
-      for (j = 0; j < nsubsys; j++) {
-	gettimeofday(&tp1, NULL);
-	c++;
-	acsSpecWriteTS(j, nchans[j], spectrum2, &record, &status);
-	gettimeofday(&tp2, NULL);
-	diff = duration( &tp1, &tp2, &status);
-	if ( diff > 0.5 ) {
-	  printf("Scan %d  in feed %d of seq %u was written in %.3f seconds\n", c, i, lseq, diff);
-	}
-
-      }
-
+  /* now go through "lut" and send the remaining spectra */
+  for (i=0; i< (int)(NSEQ*NRECEP); i++) {
+    if (status != SAI__OK) break;
+    if ( lut[i] == 0 ) {
+      feed = i % NRECEP;
+      seq = i / NRECEP;
+      printf("Sending seq %u feed %d\n", seq, feed);
+      writeSpectrum( spectrum, nsubsys, &record, nchans, feed, &c, seq, rts_step, &status );
     }
   }
+
+  /* Now close up */
   gettimeofday(&tp1, NULL);
   acsSpecCloseTS( fits, 0, &status );
   gettimeofday(&tp2, NULL);
@@ -245,7 +253,49 @@ main ( void ) {
   return exstat;
 }
 
+static void writeSpectrum( const float spectrum[], unsigned int nsubsys, ACSISRtsState *record,
+			   size_t nchans[],
+			   int feed, unsigned int * count, unsigned int seqnum, double step_time,
+			   int * status ) {
+  unsigned int j;
+  float spectrum2[NCHAN];
+  struct timeval tp1;
+  struct timeval tp2;
+  double diff;
+  unsigned int nseqchunks;
+  double ref_time = 53797.0; 
+  double step_time_in_days;
 
+  step_time_in_days = step_time / SPD;
+
+  /* Set the feed and sequence number */
+  record->acs_feed = feed;
+  record->rts_num = seqnum + 1;
+
+  /* The end sequence number can be guessed */
+  nseqchunks= seqnum / SEQLEN;
+  record->rts_end = (nseqchunks + 1) * SEQLEN;
+  record->rts_end = step_time_in_days * seqnum + ref_time;
+  record->tcs_tai = record->rts_end;
+
+  /* tweak content */
+  for (j=0; j < NCHAN; j++) {
+    spectrum2[j] = spectrum[j] + (float)feed;
+  }
+
+  for (j = 0; j < nsubsys; j++) {
+    gettimeofday(&tp1, NULL);
+    (*count)++;
+    acsSpecWriteTS(j, nchans[j], spectrum2, record, status);
+    gettimeofday(&tp2, NULL);
+    diff = duration( &tp1, &tp2, status);
+    if ( diff > 0.5 ) {
+      printf("Scan %d  in feed %d of seq %u was written in %.3f seconds\n", *count, feed, seqnum, diff);
+    }
+    
+  }
+
+}
 
 static double duration ( struct timeval * tp1, struct timeval * tp2, int * status ) {
   double diff = 0.0;
