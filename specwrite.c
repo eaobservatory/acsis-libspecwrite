@@ -942,7 +942,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
     rtsseqs = (subsys->tdata.jcmtstate)[RTS_NUM];
 
     if ((state.rts_num == subsys->curseq) &&
-	(state.rts_num == rtsseqs[subsys->curpos])) {
+	(state.rts_num == rtsseqs[subsys->curpos-1])) {
       /* may as well do the actual for search and stop immediately */
       tindex = subsys->curpos - 1;
 #if SPW_DEBUG_LEVEL > 1      
