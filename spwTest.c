@@ -64,6 +64,7 @@
 #include "sae_par.h"
 #include "star/hds.h"
 
+#define DEBUG_LEVEL 0
 
 /* Local includes */
 #include "specwrite.h"
@@ -221,7 +222,9 @@ main ( void ) {
     }
     feed = rnd % NRECEP;
     seq = rnd / NRECEP;
+#if DEBUG_LEVEL > 0
     printf("---------------Sending random seq %u feed %d\n", seq, feed);
+#endif
     writeSpectrum( spectrum, nsubsys, &record, nchans, feed, &c, seq, rts_step, &status );
     lut[rnd]++;
   }
@@ -232,7 +235,9 @@ main ( void ) {
     if ( lut[i] == 0 ) {
       feed = i % NRECEP;
       seq = i / NRECEP;
+#if DEBUG_LEVEL > 0
       printf("Sending seq %u feed %d\n", seq, feed);
+#endif
       writeSpectrum( spectrum, nsubsys, &record, nchans, feed, &c, seq, rts_step, &status );
     }
 
