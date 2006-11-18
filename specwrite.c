@@ -783,6 +783,14 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 
   if (*status != SAI__OK) return 0;
 
+  /* Check to see if we've already been called */
+  if (!INPROGRESS) {
+    *status = SAI__ERROR;
+    emsRep("HDS_SPEC_WRITETS_ERR1",
+	   "acsSpecWriteTS called, yet an observation has not been initialised", status);
+    return 0;
+  }
+
   /* make sure that the subsys number is in range */
   if ( subsysnum >= maxsubsys ) {
     *status = SAI__ERROR;
@@ -791,20 +799,18 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
     emsRep(" ","acsSpecWriteTS: Supplied subsystem number (^IN) exceeds max allowed (^MAX)", status);
     return 0;
   }
+  if (OBSINFO.nsubsys == 0) {
+    *status = SAI__ERROR;
+    emsRep(" ","acsSpecWriteTS: Number of subsystems is zero. This can not happen. Has acsSpecOpenTS been called?",
+          status);
+    return 0;
+  }
   if (subsysnum >= OBSINFO.nsubsys) {
     *status = SAI__ERROR;
     emsSetu( "IN", subsysnum );
     emsSetu( "MAX", OBSINFO.nsubsys -1 );
     emsRep( " ", "acsSpecWriteTS: Supplied subsystem number (^IN) exceeds number supplied to "
 	    "acsSpecOpenTS (^MAX)", status);
-    return 0;
-  }
-
-  /* Check to see if we've already been called */
-  if (!INPROGRESS) {
-    *status = SAI__ERROR;
-    emsRep("HDS_SPEC_WRITETS_ERR1",
-	   "acsSpecWriteTS called, yet an observation has not been initialised", status);
     return 0;
   }
 
