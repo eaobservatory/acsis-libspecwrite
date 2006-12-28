@@ -119,7 +119,9 @@ typedef struct subSystem {
   unsigned int maxsize; /* Maximum allowed size */
   unsigned int cursize; /* Number of sequence steps available */
   unsigned int curseq;  /* current RTS sequence number */
-  unsigned int curpos;  /* current index position in the cube (water mark level) */
+  unsigned int curpos;  /* current index position in the cube (water mark level) (1-based)
+			   0 indicates that nothing has been stored.
+			   Alternatively can think of this as the next slot position */
   unsigned int nchans;  /* number of spectral channels in this subsystem */
   int          inseq;   /* We are in a sequence */
   unsigned int seqlen;  /* Expected length of this sequence */
@@ -1031,7 +1033,8 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
        sequence step. */
     if (!subsys->inseq) {
 #if SPW_DEBUG_LEVEL > 1
-      printf("+++++++++++++++++++++SEQLEN set to %u\n",reqnum);
+      printf("+++++++++++++++++++++SEQLEN set to %u (start=%u, end=%u)\n",
+	     reqnum, state.rts_num, state.rts_endnum);
 #endif
       subsys->seqlen = reqnum;
       subsys->inseq = 1; /* we are now in a sequence */
@@ -1198,7 +1201,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
     if ( hasSeqSpectra( &OBSINFO, subsys, tindex, status ) ) {
 
 #if SPW_DEBUG_LEVEL > 0
-      printf("<<< Sequence %u (tindex=%u) completed with this spectrum for feed %u\n",
+      printf("<<< Sequence step %u (tindex=%u) completed with this spectrum for feed %u\n",
 	     subsys->curseq, tindex, state.acs_feed);
 #endif
       /* We *could* flush to disk at this point if we do not think the next sequence
@@ -1208,6 +1211,10 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 	 also complete if we get them in random order.
       */
       if ( subsys->curseq == state.rts_endnum ) {
+
+#if SPW_DEBUG_LEVEL > 0
+	printf("Sequence ending in %u complete\n", state.rts_endnum);
+#endif
 
 	/* Sequence complete so no longer in a sequence */
 	subsys->inseq = 0;
@@ -1220,7 +1227,8 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 	    /* write what we have pre-emptively even if the next sequence
 	       turns out to be shorter */
 #if SPW_DEBUG_LEVEL > 0
-	    printf("!!!!!!! COMPLETE SEQUENCE & FULL BUFFER <<<<<<<<\n");
+	    printf("!!!!!!! COMPLETE SEQUENCE & BUFFER TOO FULL TO ACCEPT"
+		   " %u sequence steps <<<<<<<<\n", subsys->seqlen);
 #endif
 	    flushResources( &OBSINFO, subsys, status );
 
@@ -1231,9 +1239,6 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 	}
       }
     }
-
-    /* reset insequence flag if this was the last sequence step in it*/
-    if (subsys->curseq == state.rts_endnum) subsys->inseq = 0;
 
 #if SPW_DEBUG_LEVEL > 1
     if (seqinc && *status == SAI__OK) {
@@ -2591,7 +2596,8 @@ flushResources( const obsData * obsinfo, subSystem * subsys, int * status ) {
   if (subsys->cursize > 0) {
     percent = 100.0 * (double)subsys->curpos / (double)subsys->cursize;
   }
-  printf("Flushing with memory cache = %u/%u (%.1f%% capacity)\n", subsys->curpos,
+  printf("Flushing with memory cache = %u/%u (%.1f%% capacity) <<<<<<<<<<<<<<<<<<<<<<<<<<<<<\n",
+	 subsys->curpos,
 	 subsys->cursize, percent);
 #endif /* SPW_DEBUG_LEVEL */
 
@@ -2908,7 +2914,7 @@ static int hasSeqSpectra( const obsData * obsinfo, subSystem * subsys,
     (subsys->tdata.fullSlots)[tindex] = 1;
 
     /* Since it will have been possible to fill later slots than tindex
-       we need to now read forward from fitsFreeSlot to the end of the array
+       we need to now read forward from firstFreeSlot to the end of the array
        until we find a new free slot */
     found = 0;
     curslot = subsys->tdata.firstFreeSlot;
@@ -2950,7 +2956,9 @@ static int hasSeqSpectra( const obsData * obsinfo, subSystem * subsys,
 static int hasAllSpectra( const obsData * obsinfo, const subSystem * subsys,
 			  int * status ) {
 
-  if ( subsys->curpos == (subsys->tdata.firstFreeSlot - 1) ) {
+  /* Note that curpos is 1-based and firstFreeSlot is 0-based so we can compare
+     directly */
+  if ( subsys->curpos == subsys->tdata.firstFreeSlot ) {
     return 1;
   } else {
     return 0;
