@@ -286,7 +286,7 @@ static void writeSpectrum( const float spectrum[], unsigned int nsubsys, ACSISRt
 
   /* The end sequence number can be guessed */
   nseqchunks= seqnum / SEQLEN;
-  record->rts_end = (nseqchunks + 1) * SEQLEN;
+  record->rts_endnum = (nseqchunks + 1) * SEQLEN;
   record->rts_end = step_time_in_days * seqnum + ref_time;
   record->tcs_tai = record->rts_end;
 
@@ -298,6 +298,7 @@ static void writeSpectrum( const float spectrum[], unsigned int nsubsys, ACSISRt
   for (j = 0; j < nsubsys; j++) {
     gettimeofday(&tp1, NULL);
     (*count)++;
+    /* printf("Writing spectrum sequence %u end %u\n",record->rts_num, record->rts_endnum); */
     acsSpecWriteTS(j, nchans[j], spectrum2, record, status);
     gettimeofday(&tp2, NULL);
     diff = duration( &tp1, &tp2, status);
