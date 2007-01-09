@@ -61,76 +61,19 @@
 *-
 */
 
-/* Some sizes used for dimensioning the string arrays */
-#define SIZEOF_RTS_TASKS      80
-#define SIZEOF_RTS_ERRS       80
-#define SIZEOF_TCS_SOURCE     32
-#define SIZEOF_TCS_TR_SYS     16
-#define SIZEOF_ACS_RECEPTOR    5
-#define SIZEOF_ACS_SOURCE_RO  16
-#define SIZEOF_SMU_CHOP_PHASE  1
-#define SIZEOF_TCS_BEAM        1
+#include "jcmt/state.h"
 
 /* Public data structures */
 
-/* State structures - based on sc2head from SCUBA-2 software*/
-typedef struct ACSISRtsState {
-  double pol_ang;
-  unsigned int rts_num;
+/* Structure for ACSIS meta data (see jcmt/state.h for State structure information */
+typedef struct ACSISSpecHdr {
   unsigned int rts_endnum;  /* Highest number expected in this sequence */
-  double rts_end;    /* MJD TAI of end of sequence step */
-  char   rts_tasks[SIZEOF_RTS_TASKS + 1];
-  double smu_x;
-  double smu_y;
-  double smu_z;
-  char   smu_chop_phase[SIZEOF_SMU_CHOP_PHASE+1];
-  int    smu_jig_index;
-  double smu_az_jig_x;
-  double smu_az_jig_y;
-  double smu_az_chop_x;
-  double smu_az_chop_y;
-  double smu_tr_jig_x;
-  double smu_tr_jig_y;
-  double smu_tr_chop_x;
-  double smu_tr_chop_y;
-  double tcs_tai;
-  double tcs_airmass;
-  double tcs_az_ang;
-  double tcs_az_ac1;
-  double tcs_az_ac2;
-  double tcs_az_dc1;
-  double tcs_az_dc2;
-  double tcs_az_bc1;
-  double tcs_az_bc2;
-  char   tcs_beam[SIZEOF_TCS_BEAM+1];
-  int    tcs_index;
-  char   tcs_source[SIZEOF_TCS_SOURCE+1];
-  char   tcs_tr_sys[SIZEOF_TCS_TR_SYS+1];
-  double tcs_tr_ang;
-  double tcs_tr_ac1;
-  double tcs_tr_ac2;
-  double tcs_tr_dc1;
-  double tcs_tr_dc2;
-  double tcs_tr_bc1;
-  double tcs_tr_bc2;
-  int    jos_drcontrol; /* JOS DR control tag */
-  float  enviro_rel_hum;
-  float  enviro_pressure;
-  float  enviro_air_temp;
-  double acs_feedx;  /* Y coordinate of feed "acs_feed" */
+  double acs_feedx;  /* X coordinate of feed "acs_feed" */
   double acs_feedy;  /* Y coordinate of feed "acs_feed" */
-  int    acs_spec_window_id; /* SPW id used to assign subsystem */
   unsigned int acs_feed;  /* Feed number */
   float  acs_tsys;
   float  acs_trx;
-  int    acs_no_prev_ref;
-  int    acs_no_next_ref;
-  int    acs_no_ons;
-  float  acs_exposure;
-  char   acs_source_ro[SIZEOF_ACS_SOURCE_RO+1];
-  double fe_lofreq;
-  double fe_doppler;
-} ACSISRtsState;
+} ACSISSpecHdr;
 
 
 /* NDF versions of the Spectrum writing */
@@ -151,7 +94,8 @@ void acsSpecOpenTS( const char * dir,
 int acsSpecWriteTS( unsigned int subsys,
 		    unsigned int nchans,
 		    const float spectrum[],
-		    const ACSISRtsState * state,
+		    const JCMTState * record,
+		    const ACSISSpecHdr * spechdr,
 		    int * status );
 
 /* Close the file */

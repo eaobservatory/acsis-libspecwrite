@@ -21,9 +21,11 @@
 *  History:
 *     03-MAR-2006 (TIMJ):
 *        Original version.
+*     04-JAN-2006 (TIMJ):
+*        Use jcmt/state interface
 
 *  Copyright:
-*     Copyright (C) 2006 Particle Physics and Astronomy Research Council.
+*     Copyright (C) 2006,2007 Particle Physics and Astronomy Research Council.
 *     All Rights Reserved.
 
 *  Licence:
@@ -63,6 +65,7 @@
 #include "prm_par.h"
 #include "sae_par.h"
 #include "star/hds.h"
+#include "jcmt/state.h"
 
 #define DEBUG_LEVEL 0
 
@@ -121,7 +124,9 @@ const float fplaney[] = { -1.0f,2.0f,3.0f,4.0f,5.0f,6.0f,7.6f,8.2f,
 /* Prototypes */
 static int kpgGtfts( int indf, AstFitsChan ** fchan, int * status );
 static double duration ( struct timeval * tp1, struct timeval * tp2, int * status );
-static void writeSpectrum( const float * spectrum, unsigned int nsubsys, ACSISRtsState *record,
+static void writeSpectrum( const float * spectrum, unsigned int nsubsys,
+			   JCMTState * record,
+			   ACSISSpecHdr *spechdr,
 			   size_t nchans[],
 			   int feed, unsigned int * count, unsigned int lseq, double step_time,
 			   int * status );
@@ -140,7 +145,8 @@ main ( void ) {
   float spectrum[NCHAN];
   size_t nchans[NSUBSYS];
   char lut[NRECEP*NSEQ];
-  ACSISRtsState record;
+  JCMTState record;
+  ACSISSpecHdr spechdr;
   struct timeval tp1;
   struct timeval tp2;
   double diff;
@@ -177,11 +183,11 @@ main ( void ) {
   record.pol_ang = 3.14159;
   record.rts_num = 0;
   strcpy(record.rts_tasks, "SIMULATOR");
-  *(record.tcs_beam) = '\0';
-  *(record.smu_chop_phase) = '\0';
-  record.acs_tsys = 52.8;
-  record.acs_trx = 256.7;
-  *(record.tcs_source) = '\0';
+  strcpy(record.tcs_beam, " ");
+  strcpy(record.smu_chop_phase, " ");
+  spechdr.acs_tsys = 52.8;
+  spechdr.acs_trx = 256.7;
+  strcpy(record.tcs_source, "SCIENCE");
   *(record.tcs_tr_sys) = '\0';
   strcpy(record.acs_source_ro, "SPECTRUM_RESULT");
   record.acs_no_prev_ref = 1;
@@ -190,8 +196,10 @@ main ( void ) {
   record.acs_exposure = 1.0 / DUMPRATE;
   record.fe_lofreq = 245.6;
   record.fe_doppler = 1.0;
-  record.acs_feedx = 1.0;
-  record.acs_feedy = 2.0;
+  spechdr.acs_feedx = 1.0;
+  spechdr.acs_feedy = 2.0;
+  record.jos_drcontrol = 2;
+  
 
   /* Open NDF */
   for (i = 0; i < nsubsys; i++) {
@@ -202,7 +210,7 @@ main ( void ) {
   acsSpecOpenTS( ".", 20060607, 53, NRECEP, nsubsys, recepnames,
 		 focal_station, fplanex, fplaney, &status);
   c = 0;
-  record.rts_endnum = 0;
+  spechdr.rts_endnum = 0;
 
   /* Initialise lut to zeroes */
   memset( lut, 0, NRECEP*NSEQ );
@@ -225,7 +233,7 @@ main ( void ) {
 #if DEBUG_LEVEL > 0
     printf("---------------Sending random seq %u feed %d\n", seq, feed);
 #endif
-    writeSpectrum( spectrum, nsubsys, &record, nchans, feed, &c, seq, rts_step, &status );
+    writeSpectrum( spectrum, nsubsys, &record, &spechdr, nchans, feed, &c, seq, rts_step, &status );
     lut[rnd]++;
   }
 
@@ -238,7 +246,7 @@ main ( void ) {
 #if DEBUG_LEVEL > 0
       printf("Sending seq %u feed %d\n", seq, feed);
 #endif
-      writeSpectrum( spectrum, nsubsys, &record, nchans, feed, &c, seq, rts_step, &status );
+      writeSpectrum( spectrum, nsubsys, &record, &spechdr, nchans, feed, &c, seq, rts_step, &status );
     }
 
   }
@@ -265,8 +273,8 @@ main ( void ) {
   return exstat;
 }
 
-static void writeSpectrum( const float spectrum[], unsigned int nsubsys, ACSISRtsState *record,
-			   size_t nchans[],
+static void writeSpectrum( const float spectrum[], unsigned int nsubsys, JCMTState *record,
+			   ACSISSpecHdr * spechdr, size_t nchans[],
 			   int feed, unsigned int * count, unsigned int seqnum, double step_time,
 			   int * status ) {
   unsigned int j;
@@ -281,12 +289,12 @@ static void writeSpectrum( const float spectrum[], unsigned int nsubsys, ACSISRt
   step_time_in_days = step_time / SPD;
 
   /* Set the feed and sequence number */
-  record->acs_feed = feed;
+  spechdr->acs_feed = feed;
   record->rts_num = seqnum + 1;
 
   /* The end sequence number can be guessed */
   nseqchunks= seqnum / SEQLEN;
-  record->rts_endnum = (nseqchunks + 1) * SEQLEN;
+  spechdr->rts_endnum = (nseqchunks + 1) * SEQLEN;
   record->rts_end = step_time_in_days * seqnum + ref_time;
   record->tcs_tai = record->rts_end;
 
@@ -299,7 +307,7 @@ static void writeSpectrum( const float spectrum[], unsigned int nsubsys, ACSISRt
     gettimeofday(&tp1, NULL);
     (*count)++;
     /* printf("Writing spectrum sequence %u end %u\n",record->rts_num, record->rts_endnum); */
-    acsSpecWriteTS(j, nchans[j], spectrum2, record, status);
+    acsSpecWriteTS(j, nchans[j], spectrum2, record, spechdr, status);
     gettimeofday(&tp2, NULL);
     diff = duration( &tp1, &tp2, status);
     if ( diff > 0.5 ) {

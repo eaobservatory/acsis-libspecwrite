@@ -3,7 +3,7 @@
 <!-- component.xml.  Generated from component.xml.in by configure. -->
 
 <component id="acsisio" support="U">
-  <version>0.4-3</version>
+  <version>0.5-1</version>
   <path>libraries/acsisio</path>
   <description>I/O routines for ACSIS data files</description>
   <abstract><p> 

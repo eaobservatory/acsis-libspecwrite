@@ -26,6 +26,7 @@
 #include "star/mem.h"
 
 /* Local includes */
+#include "jcmt/state.h"
 #include "specwrite.h"
 
 /* Application name for history writing */
@@ -48,9 +49,6 @@
 
 /* Largest file name allowed (including path) */
 #define MAXFILE 1024
-
-/* Define the number of extensions we support */
-#define NEXTENSIONS 48
 
 /* Maximum number of subsystems we can handle 
    We know that ACSIS can have at most 4 spectral subsystems
@@ -88,7 +86,7 @@ typedef struct specData {
   double * receppos; /* Receptor positions (2 x  nrecep x nseq) */
   float  * tsys;     /* System temp (nrecep * nseq) */
   float  * trx;      /* Receptor receiver temp (nrecep * nseq) */
-  void   * jcmtstate[NEXTENSIONS];  /* Pointers to JCMTSTATE information */
+  void   * jcmtstate[JCMT_COMP_NUM];  /* Pointers to JCMTSTATE information */
   float  * bad;      /* array of bad values to easily initialise new time slice */
   unsigned char * count;    /* array of size (nrecep x nseq) containing 1 if spectrum written
                                else 0. Can be used to indicate when all spectra received
@@ -104,7 +102,7 @@ typedef struct fileInfo {
   int indf;   /* NDF identifier for this file */
   HDSLoc * extloc;  /* JCMSTATE extension locator */
   HDSLoc * acsisloc; /* ACSIS extension locator */
-  HDSLoc * extlocators[NEXTENSIONS]; /* Locators to each JCMTSTATE component */
+  HDSLoc * extlocators[JCMT_COMP_NUM]; /* Locators to each JCMTSTATE component */
   HDSLoc * receppos_loc;   /* Locators to each .MORE.ACSIS.RECEPPOS */  
   HDSLoc * tsys_loc;       /* Locator to .MORE.ACSIS.TSYS */
   HDSLoc * trx_loc;        /* Locator to .MORE.ACSIS.TRX */
@@ -182,12 +180,12 @@ static void resizeThisExtension ( HDSLoc * loc, size_t ndim, unsigned int newtsi
 				  int ismapped, unsigned int * oldtsize, int * status );
 
 static void writeRecord( void * basepntr[], unsigned int tindex,
-			 const ACSISRtsState * record,
+			 const JCMTState * record,
 			 int * status );
 static void writeRecepPos( const obsData * obsinfo, double * posdata, unsigned int tindex,
-			   const ACSISRtsState * record, int * status );
+			   const ACSISSpecHdr * record, int * status );
 static void writeTSysTRx( const obsData * obsinfo, float * tsysdata, float * trxdata,
-			  unsigned int frame, const ACSISRtsState * record, int * status );
+			  unsigned int frame, const ACSISSpecHdr * record, int * status );
 static unsigned int calcOffset( unsigned int nchans, unsigned int maxreceps, unsigned int nrecep, 
 				unsigned int tindex, int *status );
 
@@ -275,112 +273,8 @@ static int kpgPtfts( int indf, const AstFitsChan * fchan, int * status );
 #define RECDIM  1
 #define TDIM    2
 
-/* Define indices for array of mapped pointers to extensions */
-#define RTS_NUM           0
-#define RTS_END           1
-#define RTS_TASKS         2
-#define SMU_X             3
-#define SMU_Y             4
-#define SMU_Z             5
-#define SMU_CHOP_PHASE    6
-#define SMU_JIG_INDEX     7
-#define SMU_AZ_JIG_X      8
-#define SMU_AZ_JIG_Y      9
-#define SMU_AZ_CHOP_X    10
-#define SMU_AZ_CHOP_Y    11
-#define SMU_TR_JIG_X     12
-#define SMU_TR_JIG_Y     13
-#define SMU_TR_CHOP_X    14
-#define SMU_TR_CHOP_Y    15
-#define TCS_TAI          16
-#define TCS_AIRMASS      17
-#define TCS_AZ_ANG       18
-#define TCS_AZ_AC1       19
-#define TCS_AZ_AC2       20
-#define TCS_AZ_DC1       21
-#define TCS_AZ_DC2       22
-#define TCS_AZ_BC1       23
-#define TCS_AZ_BC2       24
-#define TCS_BEAM         25
-#define TCS_INDEX        26
-#define TCS_SOURCE       27
-#define TCS_TR_SYS       28
-#define TCS_TR_ANG       29
-#define TCS_TR_AC1       30
-#define TCS_TR_AC2       31
-#define TCS_TR_DC1       32
-#define TCS_TR_DC2       33
-#define TCS_TR_BC1       34
-#define TCS_TR_BC2       35
-#define JOS_DRCONTROL    36
-#define ENVIRO_REL_HUM   37
-#define ENVIRO_PRESSURE  38
-#define ENVIRO_AIR_TEMP  39
-#define POL_ANG          40
-#define ACS_SOURCE_RO    41
-#define ACS_NO_PREV_REF  42
-#define ACS_NO_NEXT_REF  43
-#define ACS_NO_ONS       44
-#define ACS_EXPOSURE     45
-#define FE_LOFREQ        46
-#define FE_DOPPLER       47
-
-/* Definitions of HDS types associated with ACSISRtsStates struct. All these
-   will be created in the file. */
-static const char * hdsRecordNames[NEXTENSIONS][2] = 
-  {
-   { "_INTEGER", "RTS_NUM" },
-   { "_DOUBLE", "RTS_END" },
-   { CHARTYP(SIZEOF_RTS_TASKS), "RTS_TASKS" },
-   { "_DOUBLE", "SMU_X" },
-   { "_DOUBLE", "SMU_Y" },
-   { "_DOUBLE", "SMU_Z" },
-   { CHARTYP(SIZEOF_SMU_CHOP_PHASE), "SMU_CHOP_PHASE" },
-   { "_INTEGER", "SMU_JIG_INDEX" },
-   { "_DOUBLE", "SMU_AZ_JIG_X" },
-   { "_DOUBLE", "SMU_AZ_JIG_Y" },
-   { "_DOUBLE", "SMU_AZ_CHOP_X" },
-   { "_DOUBLE", "SMU_AZ_CHOP_Y" },
-   { "_DOUBLE", "SMU_TR_JIG_X" },
-   { "_DOUBLE", "SMU_TR_JIG_Y" },
-   { "_DOUBLE", "SMU_TR_CHOP_X" },
-   { "_DOUBLE", "SMU_TR_CHOP_Y" },
-   { "_DOUBLE", "TCS_TAI" },
-   { "_DOUBLE", "TCS_AIRMASS" },
-   { "_DOUBLE", "TCS_AZ_ANG" },
-   { "_DOUBLE", "TCS_AZ_AC1" },
-   { "_DOUBLE", "TCS_AZ_AC2" },
-   { "_DOUBLE", "TCS_AZ_DC1" },
-   { "_DOUBLE", "TCS_AZ_DC2" },
-   { "_DOUBLE", "TCS_AZ_BC1" },
-   { "_DOUBLE", "TCS_AZ_BC2" },
-   { CHARTYP(SIZEOF_TCS_BEAM), "TCS_BEAM" },
-   { "_INTEGER", "TCS_INDEX" },
-   { CHARTYP(SIZEOF_TCS_SOURCE), "TCS_SOURCE" },
-   { CHARTYP(SIZEOF_TCS_TR_SYS), "TCS_TR_SYS" },
-   { "_DOUBLE", "TCS_TR_ANG" },
-   { "_DOUBLE", "TCS_TR_AC1" },
-   { "_DOUBLE", "TCS_TR_AC2" },
-   { "_DOUBLE", "TCS_TR_DC1" },
-   { "_DOUBLE", "TCS_TR_DC2" },
-   { "_DOUBLE", "TCS_TR_BC1" },
-   { "_DOUBLE", "TCS_TR_BC2" },
-   { "_INTEGER", "JOS_DRCONTROL" },
-   { "_REAL", "ENVIRO_REL_HUM" },
-   { "_REAL", "ENVIRO_PRESSURE" },
-   { "_REAL", "ENVIRO_AIR_TEMP" },
-   { "_DOUBLE", "POL_ANG" },
-   { CHARTYP(SIZEOF_ACS_SOURCE_RO), "ACS_SOURCE_RO" },
-   { "_INTEGER", "ACS_NO_PREV_REF" },
-   { "_INTEGER", "ACS_NO_NEXT_REF" },
-   { "_INTEGER", "ACS_NO_ONS" },
-   { "_REAL", "ACS_EXPOSURE" },
-   { "_DOUBLE", "FE_LOFREQ" },
-   { "_DOUBLE", "FE_DOPPLER" }
-  };
-
 /* Somewhere to store the precomputed sizes of each HDS element */
-static size_t hdsRecordSizes[NEXTENSIONS];
+static size_t hdsRecordSizes[JCMT_COMP_NUM];
 
 /* Extension support */
 
@@ -521,8 +415,8 @@ static size_t hdsRecordSizes[NEXTENSIONS];
 *  Global Variables:
 *     OBSINFO
 *     SUBSYS
-*     hdsRecordName      (readonly)
-*     NEXTENSIONS        (readonly)
+*     hdsRecords         (readonly)
+*     JCMT_COMP_NUM        (readonly)
 
 *-
 */
@@ -574,9 +468,9 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
   /* Loop and create  */
   if (!CALLED) {
     CALLED = 1;
-    for (i=0; i < NEXTENSIONS; i++ ) {
-      /* work out the number of bytes per element */
-      hdsRecordSizes[i] = sizeofHDSType( hdsRecordNames[i][0], status );
+    for (i=0; i < JCMT_COMP_NUM; i++ ) {
+      /* work out the number of bytes per element  - use same indexing as hdsRecords */
+      hdsRecordSizes[i] = sizeofHDSType( hdsRecords[i].type, status );
       if (*status != SAI__OK) break;
     }
   }
@@ -679,8 +573,8 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 
 *  Invocation:
 *     result = acsSpecWriteTS( unsigned int subsys, unsigned int nchans, 
-*                     const float spectrum[], const ACSISRtsState * record,
-*                     int *status);
+*                     const float spectrum[], const JCMTState * record, 
+*                     const ACSISSpecHdr * spechdr, int * status);
 
 *  Language:
 *     Starlink ANSI C
@@ -698,8 +592,10 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 *        subsystem.
 *     spectrum = float[nchan] (Given)
 *        Spectrum itself.
-*     record = const ACSISRtsState * (Given)
-*        Header information associated with this spectrum.
+*     record = const JCMTState * (Given)
+*        JCMT state information associated with this spectrum
+*     spechdr = const ACSISSpecHdr * (Given)
+*        ACSIS spectrum-specific information.
 *     status = int * (Given & Returned)
 *        Inherited status.
 
@@ -726,12 +622,14 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 *        Remove Freq argument.
 *     09-OCT-2006 (TIMJ):
 *        Do need chop information
+*     04-JAN-2006 (TIMJ):
+*        Use generic SCUBA-2 JCMTSTATE interface
 
 *  Notes:
 *     - Must have previously called acsSpecOpenTS.
 
 *  Copyright:
-*     Copyright (C) 2006 Particle Physics and Astronomy Research Council.
+*     Copyright (C) 2006-2007 Particle Physics and Astronomy Research Council.
 *     All Rights Reserved.
 
 *  Licence:
@@ -755,7 +653,7 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 
 int
 acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectrum[], 
-		const ACSISRtsState* record,
+		const JCMTState * record, const ACSISSpecHdr * spechdr,
 	        int * status ) {
 
   float * data; /* local copy of mapped pointer to spectrum */
@@ -781,7 +679,8 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
   unsigned int startind;
   subSystem * subsys;
 
-  ACSISRtsState  state;        /* local editable copy of state information */
+  JCMTState  state;        /* local editable copy of state information */
+  ACSISSpecHdr acshdr;     /* local editable copy of acsis hdr */
 
   if (*status != SAI__OK) return 0;
 
@@ -817,10 +716,10 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
   }
 
   /* Check feed range */
-  if ( record->acs_feed >= OBSINFO.nrecep ) {
+  if ( spechdr->acs_feed >= OBSINFO.nrecep ) {
     *status = SAI__ERROR;
     emsSetu( "NR", OBSINFO.nrecep - 1 );
-    emsSetu( "FEED", record->acs_feed );
+    emsSetu( "FEED", spechdr->acs_feed );
     emsRep( " ", "acsSpecWriteTS called, yet the feed number (^FEED) exceeds the expected number (^NR)",
 	    status );
   }
@@ -828,20 +727,21 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
   /* check that we are SPECTRUM_RESULT or SOURCE. In the future this
      will trigger the use of a CALDATA extension for calibrations but
      that is not yet implemented. */
-  if ( (strncmp( record->acs_source_ro, "SPECTRUM_RESULT", SIZEOF_ACS_SOURCE_RO )
+  if ( (strncmp( record->acs_source_ro, "SPECTRUM_RESULT", JCMT__SZACS_SOURCE_RO )
 	!= 0) &&
-       (strncmp( record->acs_source_ro, "SOURCE", SIZEOF_ACS_SOURCE_RO )
+       (strncmp( record->acs_source_ro, "SOURCE", JCMT__SZACS_SOURCE_RO )
 	!= 0) ) {
     printf("Can not accept source of '%s'\n", record->acs_source_ro );
     return -1;
   }
 
   /* first need to take a local copy for editing */
-  memcpy( &state, record, sizeof(ACSISRtsState) );
+  memcpy( &state, record, sizeof(JCMTState) );
+  memcpy( &acshdr, spechdr, sizeof(ACSISSpecHdr) );
 
   /* also convert the feed coordinates from degrees to radians */
-  state.acs_feedx *= DD2R;
-  state.acs_feedy *= DD2R;
+  acshdr.acs_feedx *= DD2R;
+  acshdr.acs_feedy *= DD2R;
 
   /* Get local copy of subsystem from global */
   subsys = &(SUBSYS[subsysnum]);
@@ -1025,8 +925,8 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
        number to extend. (but we know at least 1) */
     reqnum = 1;
 
-    if ( state.rts_endnum > state.rts_num ) {
-      reqnum = state.rts_endnum - state.rts_num + 1;
+    if ( acshdr.rts_endnum > state.rts_num ) {
+      reqnum = acshdr.rts_endnum - state.rts_num + 1;
     }
 
     /* Calculate the length of this sequence if it is started by this
@@ -1034,7 +934,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
     if (!subsys->inseq) {
 #if SPW_DEBUG_LEVEL > 1
       printf("+++++++++++++++++++++SEQLEN set to %u (start=%u, end=%u)\n",
-	     reqnum, state.rts_num, state.rts_endnum);
+	     reqnum, state.rts_num, acshdr.rts_endnum);
 #endif
       subsys->seqlen = reqnum;
       subsys->inseq = 1; /* we are now in a sequence */
@@ -1121,13 +1021,13 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 #if SPW_DEBUG_LEVEL > 0
     if (seqinc) {
       printf(">>> About to write first spectrum at position %u for sequence %u (feed=%d)\n", tindex,
-	     subsys->curseq, state.acs_feed);
+	     subsys->curseq, acshdr.acs_feed);
     }
 #endif
     /* Calculate offset into array - number of spectra into the array times number of
        channels per spectrum. */
     offset = calcOffset( subsys->nchans, OBSINFO.nrecep,
-			 state.acs_feed, tindex, status );
+			 acshdr.acs_feed, tindex, status );
 
     /* Get local copies of pointers */
     data = (subsys->tdata.spectra);
@@ -1142,7 +1042,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
     if (!seqinc) last_seqnum = (((unsigned int *)recdata[RTS_NUM])[tindex]);
 
     /* Calculate offset into count array: a  */
-    coff = calcOffset( 1, OBSINFO.nrecep, state.acs_feed, tindex, status );
+    coff = calcOffset( 1, OBSINFO.nrecep, acshdr.acs_feed, tindex, status );
 
     /* check to make sure this slot is free */
     if ( (subsys->tdata.count)[coff] != 0) {
@@ -1150,7 +1050,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 	*status = SAI__ERROR;
 	emsSetu("CURSEQ", subsys->curseq );
 	emsSetu("PREVSEQ", last_seqnum);
-	emsSetu("FEED", state.acs_feed );
+	emsSetu("FEED", acshdr.acs_feed );
 	emsSetu("T", tindex);
 	if ( (subsys->tdata.count)[coff] == 1 ) {
 	  emsRep(" ", "acsSpecWriteTS: Error. Overwriting a slot that already contains a spectrum"
@@ -1173,7 +1073,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 	emsSetu( "LAST", last_seqnum );
 	emsSetu( "CUR", subsys->curseq);
 	emsSetu( "T", tindex);
-	emsSetu("FEED", state.acs_feed);
+	emsSetu("FEED", acshdr.acs_feed);
 	emsRep(" ","Last time slot ^T was used it had sequence number ^LAST"
 	       " but now it has value ^CUR (current feed ^FEED).", status);
       }
@@ -1181,7 +1081,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 
 #if SPW_DEBUG_LEVEL > 1
     printf(">><<>> Writing spectrum from feed %u to tindex %u curpos %u offset %u\n",
-	   state.acs_feed, tindex, subsys->curpos, offset);
+	   acshdr.acs_feed, tindex, subsys->curpos, offset);
 #endif
 
     if (*status == SAI__OK)
@@ -1191,8 +1091,8 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
        sequence step but receptor positions and tsys/trx should be written 
        for all records. */
     if (seqinc) writeRecord( recdata, tindex, &state, status );
-    writeRecepPos( &OBSINFO, posdata, tindex, &state, status );
-    writeTSysTRx( &OBSINFO, tsysdata, trxdata, tindex, &state, status );
+    writeRecepPos( &OBSINFO, posdata, tindex, &acshdr, status );
+    writeTSysTRx( &OBSINFO, tsysdata, trxdata, tindex, &acshdr, status );
 
     /* increment the count for this location */
     if (*status == SAI__OK) (subsys->tdata.count)[coff]++;
@@ -1202,7 +1102,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 
 #if SPW_DEBUG_LEVEL > 0
       printf("<<< Sequence step %u (tindex=%u) completed with this spectrum for feed %u\n",
-	     subsys->curseq, tindex, state.acs_feed);
+	     subsys->curseq, tindex, acshdr.acs_feed);
 #endif
       /* We *could* flush to disk at this point if we do not think the next sequence
 	 will fit. This may alleviate network contention if we end up dumping the
@@ -1210,10 +1110,10 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 	 sequence is complete. We may need to check that the previous few are
 	 also complete if we get them in random order.
       */
-      if ( subsys->curseq == state.rts_endnum ) {
+      if ( subsys->curseq == acshdr.rts_endnum ) {
 
 #if SPW_DEBUG_LEVEL > 0
-	printf("Sequence ending in %u complete\n", state.rts_endnum);
+	printf("Sequence ending in %u complete\n", acshdr.rts_endnum);
 #endif
 
 	/* Sequence complete so no longer in a sequence */
@@ -1723,7 +1623,6 @@ openNDF( const obsData * obsinfo, const subSystem * template, subSystem * file,
   /* Create the ACSIS extension that contains the receptor names and
      positions */
   createACSISExtensions( obsinfo, file, ngrow, status );
-
   /* Also need to create the header arrays and map those ! */
   createExtensions( file, ngrow, status );
 
@@ -1755,18 +1654,31 @@ createExtensions( subSystem * subsys, unsigned int size, int * status ) {
   dim[0] = size;
 
   /* Create the extension */
-  ndfXnew( subsys->file.indf, STATEEXT, STATEEXTTYPE, 0, NULL, &(subsys->file.extloc), status ); 
+  ndfXnew( subsys->file.indf, JCMT__EXTNAME, JCMT__EXTTYPE, 0, NULL, &(subsys->file.extloc), status ); 
 
   /* Loop and create. Can initialise HDS locator array safely */
-  for (j=0; j < NEXTENSIONS; j++ ) {
-    (subsys->file.extlocators)[j] = NULL;
-    datNew( subsys->file.extloc, hdsRecordNames[j][1], hdsRecordNames[j][0],
+  for (j=0; j < JCMT_COMP_NUM; j++ ) {
+    /* what index to use? */
+    int pos = hdsRecords[j].position;
+
+    (subsys->file.extlocators)[pos] = NULL;
+    datNew( subsys->file.extloc, hdsRecords[j].name, hdsRecords[j].type,
 	    ndim, dim, status );
 
-    datFind( subsys->file.extloc, hdsRecordNames[j][1], &((subsys->file.extlocators)[j]), status );
+    datFind( subsys->file.extloc, hdsRecords[j].name, &((subsys->file.extlocators)[pos]), status );
 
-    datMap( (subsys->file.extlocators)[j], hdsRecordNames[j][0], "WRITE",
-	    ndim, dim, &((subsys->tdata.jcmtstate)[j]), status );
+    datMap( (subsys->file.extlocators)[pos], hdsRecords[j].type, "WRITE",
+	    ndim, dim, &((subsys->tdata.jcmtstate)[pos]), status );
+
+    /* if this is a string component then we can fill it with
+       blanks. Other components will not be initialised but they
+       will always be filled later on. */
+    if (strncmp( "_CHAR", hdsRecords[j].type, 5) == 0) {
+      size_t len;
+      datLen( (subsys->file.extlocators)[pos], &len, status );
+      if (*status == SAI__OK) memset( (subsys->tdata.jcmtstate)[pos], ' ', dim[0] * len );
+    }
+
     if ( *status != SAI__OK ) break;
 
   }
@@ -1788,6 +1700,7 @@ static void
 resizeExtensions( subSystem * subsys, unsigned int newsize, 
 		  int remap, int * status ) {
 
+  int pos;
   int j;
   hdsdim dim[1];
   size_t ndim = 1;
@@ -1798,26 +1711,35 @@ resizeExtensions( subSystem * subsys, unsigned int newsize,
 
   /* Do all the unmapping. Then all the resizing then all the mapping */
 
-  for (j=0; j < NEXTENSIONS; j++ ) {
-
-    datUnmap( subsys->file.extlocators[j], status );
+  for (j=0; j < JCMT_COMP_NUM; j++ ) {
+    pos = hdsRecords[j].position;
+    datUnmap( subsys->file.extlocators[pos], status );
     if ( *status != SAI__OK ) break;
   }
 
-  for (j=0; j < NEXTENSIONS; j++ ) {
-
+  for (j=0; j < JCMT_COMP_NUM; j++ ) {
+    pos = hdsRecords[j].position;
     /* resize */
     datAlter( (subsys->file.extlocators)[j], 1, dim, status);
     if ( *status != SAI__OK ) break;
   }
 
   if (remap) {
-    for (j=0; j < NEXTENSIONS; j++ ) {
-      
+    for (j=0; j < JCMT_COMP_NUM; j++ ) {
+      pos = hdsRecords[j].position;
       /* remap - assume this should be done after resizing all */
-      datMap( (subsys->file.extlocators)[j], hdsRecordNames[j][0], "WRITE",
-	      ndim, dim, &((subsys->tdata.jcmtstate)[j]), status );
+      datMap( (subsys->file.extlocators)[pos], hdsRecords[j].type, "WRITE",
+	      ndim, dim, &((subsys->tdata.jcmtstate)[pos]), status );
       if ( *status != SAI__OK ) break;
+
+      /* if this is a string component then we can fill it with
+	 blanks. Other components will not be initialised but they
+	 will always be filled later on. */
+      if (strncmp( "_CHAR", hdsRecords[j].type, 5) == 0) {
+	size_t len;
+	datLen( (subsys->file.extlocators)[pos], &len, status );
+	memset( (subsys->tdata.jcmtstate)[pos], ' ', dim[0] * len );
+      }
 
     }
   }
@@ -1831,7 +1753,7 @@ resizeExtensions( subSystem * subsys, unsigned int newsize,
 
 static void closeExtensions( subSystem * subsys, int * status ) {
 
-  int j;
+  int j, pos;
 
   if ( *status != SAI__OK ) return;
 
@@ -1840,8 +1762,9 @@ static void closeExtensions( subSystem * subsys, int * status ) {
   }
 
   /* Free locators */
-  for (j=0; j < NEXTENSIONS; j++) {
-    datAnnul( &((subsys->file.extlocators)[j]), status );
+  for (j=0; j < JCMT_COMP_NUM; j++) {
+    pos = hdsRecords[j].position;
+    datAnnul( &((subsys->file.extlocators)[pos]), status );
   }
 
   /* Close extension */
@@ -1862,100 +1785,86 @@ static void closeExtensions( subSystem * subsys, int * status ) {
 /* Write ACSISRtsState to file */
 
 static void writeRecord( void * basepntr[], unsigned int frame,
-			 const ACSISRtsState * record,
+			 const JCMTState * record,
 			 int * status ) {
   /* Can not think of anything clever to do */
   if ( *status != SAI__OK ) return;
 
+  /* Use a macro to make the code a bit more readable */
+#define STORE_STATE( state, index, type ) \
+  if (basepntr[index]) ((type *)basepntr[index])[frame] = record->state
+
+#define STORE_CHAR( state, index, len ) \
+  if (basepntr[index]) cnfExprt( record->state, (char *)basepntr[index]+len*frame, len );
+
+
   /* now copy */
 
   /* Real Time Sequencer */
-  ((int *)basepntr[RTS_NUM])[frame] = record->rts_num;
-  ((double *)basepntr[RTS_END])[frame] = record->rts_end;
+  STORE_STATE( rts_num, RTS_NUM, int );
+  STORE_STATE( rts_end, RTS_END, double );
+  STORE_CHAR( rts_tasks, RTS_TASKS, JCMT__SZRTS_TASKS );
 
-  cnfExprt( record->rts_tasks,
-	   (char *)basepntr[RTS_TASKS]+
-	    SIZEOF_RTS_TASKS*frame,
-	    SIZEOF_RTS_TASKS );
+  /* Secondary Mirror */
+  STORE_STATE( smu_x, SMU_X, double );
+  STORE_STATE( smu_y, SMU_Y, double );
+  STORE_STATE( smu_z, SMU_Z, double );
+  STORE_CHAR( smu_chop_phase, SMU_CHOP_PHASE, JCMT__SZSMU_CHOP_PHASE );
+  STORE_STATE( smu_jig_index, SMU_JIG_INDEX, int );
 
-  /* Secondary Mirror Unit */
-  ((double *)basepntr[SMU_X])[frame] = record->smu_x;
-  ((double *)basepntr[SMU_Y])[frame] = record->smu_y;
-  ((double *)basepntr[SMU_Z])[frame] = record->smu_z;
-
-  cnfExprt( record->smu_chop_phase,
-	    (char *)basepntr[SMU_CHOP_PHASE]+
-	    SIZEOF_SMU_CHOP_PHASE*frame,
-	    SIZEOF_SMU_CHOP_PHASE);
-
-  ((int *)basepntr[SMU_JIG_INDEX])[frame] = record->smu_jig_index;
-  ((double *)basepntr[SMU_AZ_JIG_X])[frame] = record->smu_az_jig_x;
-  ((double *)basepntr[SMU_AZ_JIG_Y])[frame] = record->smu_az_jig_y;
-  ((double *)basepntr[SMU_AZ_CHOP_X])[frame] = record->smu_az_chop_x;
-  ((double *)basepntr[SMU_AZ_CHOP_Y])[frame] = record->smu_az_chop_y;
-  ((double *)basepntr[SMU_TR_JIG_X])[frame] = record->smu_tr_jig_x;
-  ((double *)basepntr[SMU_TR_JIG_Y])[frame] = record->smu_tr_jig_y;
-  ((double *)basepntr[SMU_TR_CHOP_X])[frame] = record->smu_tr_chop_x;
-  ((double *)basepntr[SMU_TR_CHOP_Y])[frame] = record->smu_tr_chop_y;
+  STORE_STATE( smu_az_jig_x, SMU_AZ_JIG_X, double );
+  STORE_STATE( smu_az_jig_y, SMU_AZ_JIG_Y, double );
+  STORE_STATE( smu_az_chop_x, SMU_AZ_CHOP_X, double );
+  STORE_STATE( smu_az_chop_y, SMU_AZ_CHOP_Y, double );
+  STORE_STATE( smu_tr_jig_x, SMU_TR_JIG_X, double );
+  STORE_STATE( smu_tr_jig_y, SMU_TR_JIG_Y, double );
+  STORE_STATE( smu_tr_chop_x, SMU_TR_CHOP_X, double );
+  STORE_STATE( smu_tr_chop_y, SMU_TR_CHOP_Y, double );
 
   /* Telescope Control System */
-  ((double *)basepntr[TCS_TAI])[frame] = record->tcs_tai;
-  ((double *)basepntr[TCS_AIRMASS])[frame] = record->tcs_airmass;
-  ((double *)basepntr[TCS_AZ_ANG])[frame] = record->tcs_az_ang;
-  ((double *)basepntr[TCS_AZ_AC1])[frame] = record->tcs_az_ac1;
-  ((double *)basepntr[TCS_AZ_AC2])[frame] = record->tcs_az_ac2;
-  ((double *)basepntr[TCS_AZ_DC1])[frame] = record->tcs_az_dc1;
-  ((double *)basepntr[TCS_AZ_DC2])[frame] = record->tcs_az_dc2;
-  ((double *)basepntr[TCS_AZ_BC1])[frame] = record->tcs_az_bc1;
-  ((double *)basepntr[TCS_AZ_BC2])[frame] = record->tcs_az_bc2;
-
-  cnfExprt( record->tcs_beam,
-	    (char *)basepntr[TCS_BEAM]+
-	    SIZEOF_TCS_BEAM*frame,
-	    SIZEOF_TCS_BEAM);
-
-  ((int *)basepntr[TCS_INDEX])[frame] = record->tcs_index;
-
-  cnfExprt ( record->tcs_source,
-	     (char *)basepntr[TCS_SOURCE]+SIZEOF_TCS_SOURCE*frame, 
-	     SIZEOF_TCS_SOURCE );
-
-  cnfExprt ( record->tcs_tr_sys,
-	     (char *)basepntr[TCS_TR_SYS]+SIZEOF_TCS_TR_SYS*frame, 
-	     SIZEOF_TCS_TR_SYS );
-
-  ((double *)basepntr[TCS_TR_ANG])[frame] = record->tcs_tr_ang;
-  ((double *)basepntr[TCS_TR_AC1])[frame] = record->tcs_tr_ac1;
-  ((double *)basepntr[TCS_TR_AC2])[frame] = record->tcs_tr_ac2;
-  ((double *)basepntr[TCS_TR_DC1])[frame] = record->tcs_tr_dc1;
-  ((double *)basepntr[TCS_TR_DC2])[frame] = record->tcs_tr_dc2;
-  ((double *)basepntr[TCS_TR_BC1])[frame] = record->tcs_tr_bc1;
-  ((double *)basepntr[TCS_TR_BC2])[frame] = record->tcs_tr_bc2;
+  STORE_STATE( tcs_tai, TCS_TAI, double );
+  STORE_STATE( tcs_airmass, TCS_AIRMASS, double );
+  STORE_STATE( tcs_az_ang, TCS_AZ_ANG, double );
+  STORE_STATE( tcs_az_ac1, TCS_AZ_AC1, double );
+  STORE_STATE( tcs_az_ac2, TCS_AZ_AC2, double );
+  STORE_STATE( tcs_az_dc1, TCS_AZ_DC1, double );
+  STORE_STATE( tcs_az_dc2, TCS_AZ_DC2, double );
+  STORE_STATE( tcs_az_bc1, TCS_AZ_BC1, double );
+  STORE_STATE( tcs_az_bc2, TCS_AZ_BC2, double );
+  STORE_CHAR( tcs_beam, TCS_BEAM, JCMT__SZTCS_BEAM );
+  STORE_STATE( tcs_index, TCS_INDEX, int );
+  STORE_CHAR( tcs_source, TCS_SOURCE, JCMT__SZTCS_SOURCE );
+  STORE_CHAR( tcs_tr_sys, TCS_TR_SYS, JCMT__SZTCS_TR_SYS );
+  STORE_STATE( tcs_tr_ang, TCS_TR_ANG, double );
+  STORE_STATE( tcs_tr_ac1, TCS_TR_AC1, double );
+  STORE_STATE( tcs_tr_ac2, TCS_TR_AC2, double );
+  STORE_STATE( tcs_tr_dc1, TCS_TR_DC1, double );
+  STORE_STATE( tcs_tr_dc2, TCS_TR_DC2, double );
+  STORE_STATE( tcs_tr_bc1, TCS_TR_BC1, double );
+  STORE_STATE( tcs_tr_bc2, TCS_TR_BC2, double );
 
   /* JOS control */
-  ((int *)basepntr[JOS_DRCONTROL])[frame] = record->jos_drcontrol;
+  STORE_STATE( jos_drcontrol, JOS_DRCONTROL, int );
 
   /* ENVIRO task */
-  ((float *)basepntr[ENVIRO_AIR_TEMP])[frame] = record->enviro_air_temp;
-  ((float *)basepntr[ENVIRO_PRESSURE])[frame] = record->enviro_pressure;
-  ((float *)basepntr[ENVIRO_REL_HUM])[frame] = record->enviro_rel_hum;
+  STORE_STATE( enviro_air_temp, ENVIRO_AIR_TEMP, float );
+  STORE_STATE( enviro_pressure, ENVIRO_PRESSURE, float );
+  STORE_STATE( enviro_rel_hum, ENVIRO_REL_HUM, float );
 
   /* POLarimeter aka ROVER */
-  ((double *)basepntr[POL_ANG])[frame] = record->pol_ang;
+  STORE_STATE( pol_ang, POL_ANG, double );
 
   /* ACSIS internal */
-  cnfExprt( record->acs_source_ro,
-	    (char*)basepntr[ACS_SOURCE_RO]+ SIZEOF_ACS_SOURCE_RO*frame,
-	    SIZEOF_ACS_SOURCE_RO );
-
-  ((int *)basepntr[ACS_NO_PREV_REF])[frame] = record->acs_no_prev_ref;
-  ((int *)basepntr[ACS_NO_NEXT_REF])[frame] = record->acs_no_next_ref;
-  ((int *)basepntr[ACS_NO_ONS])[frame] = record->acs_no_ons;
-  ((float *)basepntr[ACS_EXPOSURE])[frame] = record->acs_exposure;
+  STORE_CHAR( acs_source_ro, ACS_SOURCE_RO, JCMT__SZACS_SOURCE_RO );
+  STORE_STATE( acs_no_prev_ref, ACS_NO_PREV_REF, int );
+  STORE_STATE( acs_no_next_ref, ACS_NO_NEXT_REF, int );
+  STORE_STATE( acs_no_ons, ACS_NO_ONS, int );
+  STORE_STATE( acs_exposure, ACS_EXPOSURE, float );
+  STORE_STATE( acs_offexposure, ACS_OFFEXPOSURE, float );
 
   /* Frontend */
-  ((double *)basepntr[FE_LOFREQ])[frame] = record->fe_lofreq;
-  ((double *)basepntr[FE_DOPPLER])[frame] = record->fe_doppler;
+  STORE_STATE( fe_lofreq, FE_LOFREQ, double );
+  STORE_STATE( fe_doppler, FE_DOPPLER, double );
 
 }
 
@@ -2271,17 +2180,17 @@ static void closeACSISExtensions( subSystem * subsys, int * status ) {
 
 /* Write coordinate positions to ACSIS extension */
 static void writeRecepPos( const obsData * obsinfo, double * posdata, unsigned int frame, 
-			   const ACSISRtsState * record, int * status ) {
+			   const ACSISSpecHdr * spechdr, int * status ) {
   unsigned int offset;
 
   if (*status != SAI__OK) return;
 
   /* Calculate offset into data array */
-  offset = calcOffset( 2, obsinfo->nrecep, record->acs_feed, frame, status );
+  offset = calcOffset( 2, obsinfo->nrecep, spechdr->acs_feed, frame, status );
 
   if (posdata != NULL) {
-    posdata[offset] = record->acs_feedx;
-    posdata[offset+1] = record->acs_feedy;
+    posdata[offset] = spechdr->acs_feedx;
+    posdata[offset+1] = spechdr->acs_feedy;
   } else {
     *status = SAI__ERROR;
     emsRep( " ", "Attempted to write receptor positions but no data array available",
@@ -2293,17 +2202,17 @@ static void writeRecepPos( const obsData * obsinfo, double * posdata, unsigned i
 /* Write Tsys and Trx to ACSIS extension */
 static void writeTSysTRx( const obsData * obsinfo, float * tsys_data,
 			 float * trx_data, unsigned int frame, 
-			 const ACSISRtsState * record, int * status ) {
+			 const ACSISSpecHdr * spechdr, int * status ) {
   unsigned int offset;
 
   if (*status != SAI__OK) return;
 
   /* Calculate offset into data array */
-  offset = calcOffset( 1, obsinfo->nrecep, record->acs_feed, frame, status );
+  offset = calcOffset( 1, obsinfo->nrecep, spechdr->acs_feed, frame, status );
 
   if (tsys_data != NULL && trx_data != NULL ) {
-    tsys_data[offset] = record->acs_tsys;
-    trx_data[offset] = record->acs_trx;
+    tsys_data[offset] = spechdr->acs_tsys;
+    trx_data[offset] = spechdr->acs_trx;
   } else {
     if (*status == SAI__OK) {
       *status = SAI__ERROR;
@@ -2639,7 +2548,7 @@ flushResources( const obsData * obsinfo, subSystem * subsys, int * status ) {
 
 static void freeResources ( obsData * obsinfo, subSystem * subsys, int * status) {
 
-  unsigned int i;
+  unsigned int i, pos;
 
   /* Do not use status since we want to free the memory */
 
@@ -2649,10 +2558,11 @@ static void freeResources ( obsData * obsinfo, subSystem * subsys, int * status)
       starFree( subsys->tdata.spectra);
       subsys->tdata.spectra = NULL;
     }
-    for (i=0; i<NEXTENSIONS; i++) {
-      if ((subsys->tdata.jcmtstate)[i] != NULL) {
-	starFree( (subsys->tdata.jcmtstate)[i] );
-	(subsys->tdata.jcmtstate)[i] = NULL;
+    for (i=0; i<JCMT_COMP_NUM; i++) {
+      pos = hdsRecords[i].position;
+      if ((subsys->tdata.jcmtstate)[pos] != NULL) {
+	starFree( (subsys->tdata.jcmtstate)[pos] );
+	(subsys->tdata.jcmtstate)[pos] = NULL;
       }
     }
     if (subsys->tdata.receppos != NULL) {
@@ -2720,18 +2630,19 @@ allocHeaders( subSystem * subsys, unsigned int size, int * status ) {
   tdata = &(subsys->tdata);
 
   /* Make sure all are initialised */
-  for (j=0; j < NEXTENSIONS; j++) {
+  for (j=0; j < JCMT_COMP_NUM; j++) {
     (tdata->jcmtstate)[j] = NULL;
   }
 
   /* Loop and create  */
-  for (j=0; j < NEXTENSIONS; j++ ) {
-
+  for (j=0; j < JCMT_COMP_NUM; j++ ) {
+    int pos;
     if (*status != SAI__OK) break;
+    pos = hdsRecords[j].position;
     
     /* get some memory */
     /* Do not need to initialise since we always populate it */
-    myRealloc( &((tdata->jcmtstate)[j]), size * hdsRecordSizes[j], status );
+    myRealloc( &((tdata->jcmtstate)[pos]), size * hdsRecordSizes[j], status );
 
   }
 
@@ -2869,8 +2780,9 @@ static size_t sizeofHDSType( const char * type, int * status ) {
   output->curpos = nseq;
 
   /* sequence data */
-  for (i=0; i<NEXTENSIONS; i++) {
-    memcpy( (output->tdata.jcmtstate)[i], (input->tdata.jcmtstate)[i], nseq * hdsRecordSizes[i] );
+  for (i=0; i<JCMT_COMP_NUM; i++) {
+    int pos = hdsRecords[i].position;
+    memcpy( (output->tdata.jcmtstate)[pos], (input->tdata.jcmtstate)[pos], nseq * hdsRecordSizes[i] );
   }
 
   /* receptor positions */
