@@ -3490,7 +3490,6 @@ AstFrameSet *specWcs( const AstFrameSet *fs, const char veldef[], int ntime, con
 
      /* We would like to use iso.0 for anything that is longer than 10 seconds (say)
        else use iso.2 because ACSIS can not take spectra faster than 0.05 second. */
-     printf("Delta=%f\n",(ltimes[ntime-1]-ltimes[0]));
      if ( (ltimes[ntime-1] - ltimes[0]) < (10.0 / SPD) ) {
        astSet(timefrm, "format=iso.2");
      } else {
