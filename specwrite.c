@@ -3065,7 +3065,7 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
 
   /* headers to be retained */
   char * retainfits[] = {
-    "DATE-OBS", "OBSGEO-X", "OBSGEO-Y", "OBSGEO-Z", "SSYSOBS", NULL
+    "DATE-OBS", "OBSGEO-X", "OBSGEO-Y", "OBSGEO-Z", "SSYSOBS", "DUT1", NULL
   };
 
   if (*status != SAI__OK) return;
