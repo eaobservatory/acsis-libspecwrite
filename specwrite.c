@@ -327,6 +327,57 @@ static size_t hdsRecordSizes[JCMT_COMP_NUM];
 /*
 *+
 *  Name:
+*     acsSpecWriterVersion
+
+*  Purpose:
+*     Retrieve the library version number
+
+*  Language:
+*     Starlink ANSI C
+
+*  Description:
+*     Return the library version number as an integer in the form major*1e6 + minor*1e3 + release.
+*     Can be used to trap behavioural changes in the library (especially when switching between
+*     versions of the ACSIS acquisition software whilst leaving the specwriter library in place).
+
+*  Arguments:
+*     None
+
+*  Returned Value:
+*     acsSpecWriterVersion = int
+*        The version number as an integer.
+
+*  Copyright:
+*     Copyright (C) 2007 Particle Physics and Astronomy Research Council.
+*     All Rights Reserved.
+
+*  Licence:
+*     This program is free software; you can redistribute it and/or
+*     modify it under the terms of the GNU General Public License as
+*     published by the Free Software Foundation; either version 2 of
+*     the License, or (at your option) any later version.
+*
+*     This program is distributed in the hope that it will be
+*     useful, but WITHOUT ANY WARRANTY; without even the implied
+*     warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
+*     PURPOSE. See the GNU General Public License for more details.
+*
+*     You should have received a copy of the GNU General Public
+*     License along with this program; if not, write to the Free
+*     Software Foundation, Inc., 59 Temple Place, Suite 330, Boston,
+*     MA 02111-1307, USA
+
+*-
+*/
+
+int
+acsSpecWriterVersion() {
+  return PACKAGE_VERSION_INTEGER;
+}
+
+/*
+*+
+*  Name:
 *     acsSpecOpenTS
 
 *  Purpose:
@@ -1285,8 +1336,11 @@ acsSpecCloseTS( const AstFitsChan * fits[], int incArchiveBounds, int * status )
 #endif
       flushResources( &OBSINFO, subsys, &lstat);
     }
-    freeResources( &OBSINFO, subsys, &lstat );
+    /* we can't free OBSINFO until after all subsystems are written */
+    freeResources( NULL, subsys, &lstat );
   }
+  /* now free OBSINFO */
+  freeResources( &OBSINFO, NULL, &lstat);
 
   /* report error if not found any open NDFs */
   if (lstat == SAI__OK && !found) {
@@ -2546,70 +2600,78 @@ flushResources( const obsData * obsinfo, subSystem * subsys, int * status ) {
 
 }
 
+/* Note that obsinfo and subsys can be NULL */
+
 static void freeResources ( obsData * obsinfo, subSystem * subsys, int * status) {
 
   unsigned int i, pos;
 
   /* Do not use status since we want to free the memory */
+  if (subsys) {
 
-  if ( subsys->file.indf == NDF__NOID) {
+    if ( subsys->file.indf == NDF__NOID) {
 
-    if ( subsys->tdata.spectra != NULL) {
-      starFree( subsys->tdata.spectra);
-      subsys->tdata.spectra = NULL;
-    }
-    for (i=0; i<JCMT_COMP_NUM; i++) {
-      pos = hdsRecords[i].position;
-      if ((subsys->tdata.jcmtstate)[pos] != NULL) {
-	starFree( (subsys->tdata.jcmtstate)[pos] );
-	(subsys->tdata.jcmtstate)[pos] = NULL;
+      if ( subsys->tdata.spectra != NULL) {
+	starFree( subsys->tdata.spectra);
+	subsys->tdata.spectra = NULL;
       }
+      for (i=0; i<JCMT_COMP_NUM; i++) {
+	pos = hdsRecords[i].position;
+	if ((subsys->tdata.jcmtstate)[pos] != NULL) {
+	  starFree( (subsys->tdata.jcmtstate)[pos] );
+	  (subsys->tdata.jcmtstate)[pos] = NULL;
+	}
+      }
+      if (subsys->tdata.receppos != NULL) {
+	starFree( subsys->tdata.receppos );
+	subsys->tdata.receppos = NULL;
+      }
+      if (subsys->tdata.tsys != NULL) {
+	starFree( subsys->tdata.tsys );
+	subsys->tdata.tsys = NULL;
+      }
+      if (subsys->tdata.trx != NULL) {
+	starFree( subsys->tdata.trx );
+	subsys->tdata.trx = NULL;
+      }
+
     }
-    if (subsys->tdata.receppos != NULL) {
-      starFree( subsys->tdata.receppos );
-      subsys->tdata.receppos = NULL;
-    }
-    if (subsys->tdata.tsys != NULL) {
-      starFree( subsys->tdata.tsys );
-      subsys->tdata.tsys = NULL;
-    }
-    if (subsys->tdata.trx != NULL) {
-      starFree( subsys->tdata.trx );
-      subsys->tdata.trx = NULL;
+
+    if (subsys->tdata.bad != NULL) {
+      starFree( subsys->tdata.bad );
+      subsys->tdata.bad = NULL;
     }
 
-  }
+    if (subsys->tdata.count != NULL) {
+      starFree( subsys->tdata.count );
+      subsys->tdata.count = NULL;
+    }
 
-  if (subsys->tdata.bad != NULL) {
-    starFree( subsys->tdata.bad );
-    subsys->tdata.bad = NULL;
-  }
+    if (subsys->tdata.fullSlots != NULL) {
+      starFree( subsys->tdata.fullSlots );
+      subsys->tdata.fullSlots = NULL;
+    }
+    subsys->tdata.firstFreeSlot = 0;
 
-  if (subsys->tdata.count != NULL) {
-    starFree( subsys->tdata.count );
-    subsys->tdata.count = NULL;
-  }
+  } /* subsys */
 
-  if (subsys->tdata.fullSlots != NULL) {
-    starFree( subsys->tdata.fullSlots );
-    subsys->tdata.fullSlots = NULL;
-  }
-  subsys->tdata.firstFreeSlot = 0;
+  if (obsinfo) {
 
-  if (obsinfo->recep_name_buff != NULL) {
-    starFree( obsinfo->recep_name_buff );
-    obsinfo->recep_name_buff = NULL;
-    obsinfo->receplen = 0;
-  }
+    if (obsinfo->recep_name_buff != NULL) {
+      starFree( obsinfo->recep_name_buff );
+      obsinfo->recep_name_buff = NULL;
+      obsinfo->receplen = 0;
+    }
 
-  if (obsinfo->fplanex != NULL) {
-    starFree( obsinfo->fplanex );
-    obsinfo->fplanex = NULL;
-  }
+    if (obsinfo->fplanex != NULL) {
+      starFree( obsinfo->fplanex );
+      obsinfo->fplanex = NULL;
+    }
 
-  if (obsinfo->fplaney != NULL) {
-    starFree( obsinfo->fplaney );
-    obsinfo->fplaney = NULL;
+    if (obsinfo->fplaney != NULL) {
+      starFree( obsinfo->fplaney );
+      obsinfo->fplaney = NULL;
+    }
   }
 
 }
