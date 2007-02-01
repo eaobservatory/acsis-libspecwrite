@@ -37,9 +37,13 @@
 *        Add TCS_TAI
 *     11-OCT-2006 (TIMJ):
 *        Add FE_LOFREQ and FE_DOPPLER
+*     01-JAN-2007 (TIMJ):
+*        Synchronize with jcmt/state.h
+*     01-FEB-2007 (TIMJ):
+*        Add acsSpecWriterVersion
 
 *  Copyright:
-*     Copyright (C) 2006 Particle Physics and Astronomy Research Council.
+*     Copyright (C) 2006-2007 Particle Physics and Astronomy Research Council.
 *     All Rights Reserved.
 
 *  Licence:
@@ -103,7 +107,8 @@ void acsSpecCloseTS( const AstFitsChan * fits[],
 		     int incArchiveBounds,
 		     int * status );
 
-
+/* Library version number */
+int acsSpecWriterVersion( void );
 
 /* INCLUDE_HDS_SPEC_H */
 #endif
