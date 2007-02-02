@@ -44,7 +44,10 @@ dnl    List the sun/ssn/... numbers which document this package and
 dnl    which are present as .tex files in this directory.
 dnl STAR_LATEX_DOCUMENTATION(sunxx)
  
- 
+dnl    Would like the version number as an integer
+AC_DEFINE_UNQUOTED([PACKAGE_VERSION_INTEGER], $PACKAGE_VERSION_INTEGER,
+                    [Integer version number, in the form major*1e6+minor*1e3+release])
+
 dnl    If you wish to configure extra files, you can add them to this
 dnl    declaration.
 AC_CONFIG_FILES(Makefile component.xml)
