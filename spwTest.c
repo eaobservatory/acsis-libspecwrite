@@ -307,7 +307,7 @@ static void writeSpectrum( const float spectrum[], unsigned int nsubsys, JCMTSta
     gettimeofday(&tp1, NULL);
     (*count)++;
     /* printf("Writing spectrum sequence %u end %u\n",record->rts_num, record->rts_endnum); */
-    acsSpecWriteTS(j, nchans[j], spectrum2, record, spechdr, status);
+    acsSpecWriteTS(j+1, nchans[j], spectrum2, record, spechdr, status);
     gettimeofday(&tp2, NULL);
     diff = duration( &tp1, &tp2, status);
     if ( diff > 0.5 ) {
