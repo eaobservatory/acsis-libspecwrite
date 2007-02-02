@@ -600,7 +600,7 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
       memset( subsys, 0, sizeof(*subsys));
 
       /* Some intialisation */
-      subsys->index = i;
+      subsys->index = i + 1;
 
     }
 
@@ -636,7 +636,7 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 
 *  Arguments:
 *     subsys = unsigned int (Given)
-*        Subsystem used for this spectrum (start counting at 0).
+*        Subsystem used for this spectrum (start counting at 1).
 *     nchans = unsigned int (Given)
 *        Number of channels in the spectrum. The number of channels
 *        must be identical for all spectra supplied for the identical
@@ -744,10 +744,10 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
   }
 
   /* make sure that the subsys number is in range */
-  if ( subsysnum >= maxsubsys ) {
+  if ( subsysnum > maxsubsys ) {
     *status = SAI__ERROR;
     emsSetu("IN", subsysnum);
-    emsSeti("MAX", maxsubsys-1);
+    emsSeti("MAX", maxsubsys);
     emsRep(" ","acsSpecWriteTS: Supplied subsystem number (^IN) exceeds max allowed (^MAX)", status);
     return 0;
   }
@@ -757,10 +757,10 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
           status);
     return 0;
   }
-  if (subsysnum >= OBSINFO.nsubsys) {
+  if (subsysnum > OBSINFO.nsubsys) {
     *status = SAI__ERROR;
     emsSetu( "IN", subsysnum );
-    emsSetu( "MAX", OBSINFO.nsubsys -1 );
+    emsSetu( "MAX", OBSINFO.nsubsys );
     emsRep( " ", "acsSpecWriteTS: Supplied subsystem number (^IN) exceeds number supplied to "
 	    "acsSpecOpenTS (^MAX)", status);
     return 0;
@@ -3058,7 +3058,7 @@ void writeFlagFile (const obsData * obsinfo, const subSystem subsystems[],
 	/* contents of okay file are relative to data dir but should
 	   not include datadir itself */
 	ldir = getDirName( NULL, obsinfo->yyyymmdd, obsinfo->obsnum, status );
-	fname = getFileName( ldir, obsinfo->yyyymmdd, i,
+	fname = getFileName( ldir, obsinfo->yyyymmdd, i+1,
 			     obsinfo->obsnum, j, status );
 	fprintf( fstream, "%s\n", fname );
       }
@@ -3236,7 +3236,7 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
     /* subscans start counting at 1 */
     for (j = 1; j <= subsys->file.subscan ; j++ ) {
       /* need full path of file */
-      fname = getFileName( obsinfo->datadir, obsinfo->yyyymmdd, i,
+      fname = getFileName( obsinfo->datadir, obsinfo->yyyymmdd, i+1,
 			   obsinfo->obsnum, j, status );
 
       /* open the NDF */
