@@ -751,6 +751,11 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
     emsRep(" ","acsSpecWriteTS: Supplied subsystem number (^IN) exceeds max allowed (^MAX)", status);
     return 0;
   }
+  if ( subsysnum == 0 ) {
+    *status = SAI__ERROR;
+    emsRep(" ","acsSpecWriteTS: Supplied subsystem number must be greater than 0", status);
+    return 0;
+  }
   if (OBSINFO.nsubsys == 0) {
     *status = SAI__ERROR;
     emsRep(" ","acsSpecWriteTS: Number of subsystems is zero. This can not happen. Has acsSpecOpenTS been called?",
