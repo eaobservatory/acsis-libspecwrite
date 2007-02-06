@@ -800,7 +800,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
   acshdr.acs_feedy *= DD2R;
 
   /* Get local copy of subsystem from global */
-  subsys = &(SUBSYS[subsysnum]);
+  subsys = &(SUBSYS[subsysnum-1]);
 
   /* store the input curpos */
   inpos = subsys->curpos;
@@ -879,8 +879,9 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 
   /* Allocate resources for this subsystem if not currently allocated */
   if (!subsys->alloced) {
-#if SPW_DEBUG_LEVEL > 1
-    printf("+++++++ Need to allocate resources on entry to WriteTS\n");
+#if SPW_DEBUG_LEVEL > 0
+    printf("+++++++ Need to allocate resources on entry to WriteTS for subsystem %d\n",
+	   (subsysnum));
 #endif
     allocResources( &OBSINFO, subsys, subsys->maxsize, status );
   }
@@ -1337,7 +1338,7 @@ acsSpecCloseTS( const AstFitsChan * fits[], int incArchiveBounds, int * status )
     if ( subsys->file.indf != NDF__NOID || subsys->tdata.spectra != NULL) {
       found = 1;
 #if SPW_DEBUG_LEVEL > 1
-      printf("-------- Final close flush\n");
+      printf("-------- Final close flush subsystem %d\n",(i+1));
 #endif
       flushResources( &OBSINFO, subsys, &lstat);
     }
