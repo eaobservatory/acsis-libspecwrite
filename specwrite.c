@@ -136,6 +136,7 @@ obsData   OBSINFO;           /* Global observation information */
 /* Status flags */
 unsigned int INPROGRESS = 0; /* true if an observation is in progress */
 unsigned int CALLED = 0;     /* has openTS been called at least once */
+unsigned int COUNTER = 0;    /* Number of spectra sent since Open */
 
 /* internal prototypes */
 static char * getFileName( const char * dir, unsigned int yyyymmdd, unsigned int subsys,
@@ -606,6 +607,9 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 
     /* indicate that an observation is now ready */
     INPROGRESS = 1;
+
+    /* Reset counter */
+    COUNTER = 0;
 
   }
 
@@ -1225,6 +1229,9 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 
   } /* status ok for writing a spectrum */
 
+  /* increment counter */
+  COUNTER++;
+
   return 1;
 }
 
@@ -1351,7 +1358,8 @@ acsSpecCloseTS( const AstFitsChan * fits[], int incArchiveBounds, int * status )
   /* report error if not found any open NDFs */
   if (lstat == SAI__OK && !found) {
     lstat = SAI__ERROR;
-    emsRep(" ", "acsSpecCloseTS: Failed to find open NDF components", &lstat );
+    emsSetu( "C", COUNTER);
+    emsRep(" ", "acsSpecCloseTS: Failed to find open NDF components or any received data (got ^C spectra)", &lstat );
   }
 
   /* Now need to open all the files that we have opened previously and adjust
@@ -1404,6 +1412,8 @@ acsSpecCloseTS( const AstFitsChan * fits[], int incArchiveBounds, int * status )
     /* make sure that the exit status is returned */
     *status = lstat;
   }
+
+  printf("Wrote %u spectra in total\n", COUNTER);
  
 }
 
@@ -1722,25 +1732,28 @@ createExtensions( subSystem * subsys, unsigned int size, int * status ) {
     int pos = hdsRecords[j].position;
 
     (subsys->file.extlocators)[pos] = NULL;
-    datNew( subsys->file.extloc, hdsRecords[j].name, hdsRecords[j].type,
-	    ndim, dim, status );
 
-    datFind( subsys->file.extloc, hdsRecords[j].name, &((subsys->file.extlocators)[pos]), status );
+    /* see if component is required for this instrument or not */
+    if ( hdsRecords[j].instrument & INST__ACSIS ) {
 
-    datMap( (subsys->file.extlocators)[pos], hdsRecords[j].type, "WRITE",
-	    ndim, dim, &((subsys->tdata.jcmtstate)[pos]), status );
+      datNew( subsys->file.extloc, hdsRecords[j].name, hdsRecords[j].type,
+	      ndim, dim, status );
 
-    /* if this is a string component then we can fill it with
-       blanks. Other components will not be initialised but they
-       will always be filled later on. */
-    if (strncmp( "_CHAR", hdsRecords[j].type, 5) == 0) {
-      size_t len;
-      datLen( (subsys->file.extlocators)[pos], &len, status );
-      if (*status == SAI__OK) memset( (subsys->tdata.jcmtstate)[pos], ' ', dim[0] * len );
+      datFind( subsys->file.extloc, hdsRecords[j].name, &((subsys->file.extlocators)[pos]), status );
+
+      datMap( (subsys->file.extlocators)[pos], hdsRecords[j].type, "WRITE",
+	      ndim, dim, &((subsys->tdata.jcmtstate)[pos]), status );
+
+      /* if this is a string component then we can fill it with
+	 blanks. Other components will not be initialised but they
+	 will always be filled later on. */
+      if (strncmp( "_CHAR", hdsRecords[j].type, 5) == 0) {
+	size_t len;
+	datLen( (subsys->file.extlocators)[pos], &len, status );
+	if (*status == SAI__OK) memset( (subsys->tdata.jcmtstate)[pos], ' ', dim[0] * len );
+      }
     }
-
     if ( *status != SAI__OK ) break;
-
   }
 
   if (*status == SAI__OK) subsys->file.extmapped = 1;
@@ -1773,32 +1786,39 @@ resizeExtensions( subSystem * subsys, unsigned int newsize,
 
   for (j=0; j < JCMT_COMP_NUM; j++ ) {
     pos = hdsRecords[j].position;
-    datUnmap( subsys->file.extlocators[pos], status );
+    if (subsys->file.extlocators[pos] != NULL)
+      datUnmap( subsys->file.extlocators[pos], status );
     if ( *status != SAI__OK ) break;
   }
 
   for (j=0; j < JCMT_COMP_NUM; j++ ) {
     pos = hdsRecords[j].position;
     /* resize */
-    datAlter( (subsys->file.extlocators)[j], 1, dim, status);
+    if (subsys->file.extlocators[pos] != NULL)
+      datAlter( (subsys->file.extlocators)[j], 1, dim, status);
     if ( *status != SAI__OK ) break;
   }
 
   if (remap) {
     for (j=0; j < JCMT_COMP_NUM; j++ ) {
       pos = hdsRecords[j].position;
-      /* remap - assume this should be done after resizing all */
-      datMap( (subsys->file.extlocators)[pos], hdsRecords[j].type, "WRITE",
-	      ndim, dim, &((subsys->tdata.jcmtstate)[pos]), status );
-      if ( *status != SAI__OK ) break;
 
-      /* if this is a string component then we can fill it with
-	 blanks. Other components will not be initialised but they
-	 will always be filled later on. */
-      if (strncmp( "_CHAR", hdsRecords[j].type, 5) == 0) {
-	size_t len;
-	datLen( (subsys->file.extlocators)[pos], &len, status );
-	memset( (subsys->tdata.jcmtstate)[pos], ' ', dim[0] * len );
+      /* see if component is required for this instrument or not */
+      if ( hdsRecords[j].instrument & INST__ACSIS ) {
+
+	/* remap - assume this should be done after resizing all */
+	datMap( (subsys->file.extlocators)[pos], hdsRecords[j].type, "WRITE",
+		ndim, dim, &((subsys->tdata.jcmtstate)[pos]), status );
+	if ( *status != SAI__OK ) break;
+
+	/* if this is a string component then we can fill it with
+	   blanks. Other components will not be initialised but they
+	   will always be filled later on. */
+	if (strncmp( "_CHAR", hdsRecords[j].type, 5) == 0) {
+	  size_t len;
+	  datLen( (subsys->file.extlocators)[pos], &len, status );
+	  memset( (subsys->tdata.jcmtstate)[pos], ' ', dim[0] * len );
+	}
       }
 
     }
@@ -1824,7 +1844,9 @@ static void closeExtensions( subSystem * subsys, int * status ) {
   /* Free locators */
   for (j=0; j < JCMT_COMP_NUM; j++) {
     pos = hdsRecords[j].position;
-    datAnnul( &((subsys->file.extlocators)[pos]), status );
+    /* see if component is required for this instrument or not */
+    if ( hdsRecords[j].instrument & INST__ACSIS )
+      datAnnul( &((subsys->file.extlocators)[pos]), status );
   }
 
   /* Close extension */
@@ -2708,10 +2730,12 @@ allocHeaders( subSystem * subsys, unsigned int size, int * status ) {
     if (*status != SAI__OK) break;
     pos = hdsRecords[j].position;
     
-    /* get some memory */
-    /* Do not need to initialise since we always populate it */
-    myRealloc( &((tdata->jcmtstate)[pos]), size * hdsRecordSizes[j], status );
-
+    /* see if component is required for this instrument or not */
+    if ( hdsRecords[j].instrument & INST__ACSIS ) {
+      /* get some memory */
+      /* Do not need to initialise since we always populate it */
+      myRealloc( &((tdata->jcmtstate)[pos]), size * hdsRecordSizes[j], status );
+    }
   }
 
   if (*status != SAI__OK) emsRep( " ", "allocHeaders: Unable to malloc memory for headers", status );
@@ -2850,7 +2874,9 @@ static size_t sizeofHDSType( const char * type, int * status ) {
   /* sequence data */
   for (i=0; i<JCMT_COMP_NUM; i++) {
     int pos = hdsRecords[i].position;
-    memcpy( (output->tdata.jcmtstate)[pos], (input->tdata.jcmtstate)[pos], nseq * hdsRecordSizes[i] );
+    /* see if component is required for this instrument or not */
+    if ( hdsRecords[i].instrument & INST__ACSIS )
+      memcpy( (output->tdata.jcmtstate)[pos], (input->tdata.jcmtstate)[pos], nseq * hdsRecordSizes[i] );
   }
 
   /* receptor positions */
