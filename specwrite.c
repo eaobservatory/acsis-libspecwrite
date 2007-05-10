@@ -71,6 +71,7 @@ typedef struct obsData {
   char focal_station[SPW__SZFSTAT+1];  /* Focal station of this instrument */
   float * fplanex;        /* X and Y coordinates of receptors in focal plane arcsec */
   float * fplaney;
+  char  * ocsconfig;      /* OCS Configuration XML */
   /* observation number, ut date and number of subsystems */
   unsigned int obsnum;
   unsigned int yyyymmdd;
@@ -389,7 +390,7 @@ acsSpecWriterVersion() {
 *                    unsigned int obsnum, unsigned int nrecep,
 *                    unsigned int nsubsys, const char *recepnames[],
 *                    const char * focal_station,
-*                    const float fplanex[], const float fplaney[],
+*                    const float fplanex[], const float fplaney[], const char * ocsconfig,
 *                    int * status );
 
 *  Language:
@@ -420,6 +421,8 @@ acsSpecWriterVersion() {
 *        X offsets of each receptor in the focal plane (arcsec).
 *     fplaney[] = const float[] (Given)
 *        Y offsets of each receptor in the focal plane (arcsec).
+*     ocsconfig = const char* (Given)
+*        OCS Configuration XML
 *     status = int * (Given & Returned)
 *        Inherited status.
 
@@ -433,8 +436,10 @@ acsSpecWriterVersion() {
 *        Use structured globals
 *     21-APR-2006 (TIMJ):
 *        Defer resource allocation until the first spectrum arrives.
-*     26-JUL-2005 (TIMJ):
+*     26-JUL-2006 (TIMJ):
 *        Add FPLANE arguments.
+*     09-MAY-2007 (TIMJ):
+*        Add ocsconfig
 
 *  Notes:
 *     - Currently only one observation can be active at any time
@@ -446,6 +451,7 @@ acsSpecWriterVersion() {
 
 *  Copyright:
 *     Copyright (C) 2006 Particle Physics and Astronomy Research Council.
+*     Copyright (C) 2007 Science and Technology Facilities Council.
 *     All Rights Reserved.
 
 *  Licence:
@@ -478,7 +484,7 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 	       unsigned int nrecep, unsigned int nsubsys, 
 	       const char *recepnames[],
 	       const char * focal_station,
-	       const float fplanex[], const float fplaney[],
+	       const float fplanex[], const float fplaney[], const char *ocsconfig,
 	       int * status ) {
 
   char * cpos = NULL;          /* offset into string */
@@ -540,6 +546,7 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
   }
   OBSINFO.fplanex = NULL;
   OBSINFO.fplaney = NULL;
+  OBSINFO.ocsconfig = NULL;
 
   /* Create the directory to receive each subscan */
   sdir = createSubScanDir( dir, yyyymmdd, obsnum, status );
@@ -584,6 +591,14 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
       OBSINFO.fplaney = starMalloc( nrecep * sizeof(*fplaney) );
       memcpy( OBSINFO.fplanex, fplanex, nrecep * sizeof(*fplanex) );
       memcpy( OBSINFO.fplaney, fplaney, nrecep * sizeof(*fplaney) );
+    }
+
+    /* Allocate memory for OCS config string */
+    if (*status == SAI__OK && ocsconfig != NULL) {
+      size_t szcfg;
+      szcfg = strlen( ocsconfig );
+      OBSINFO.ocsconfig = starMalloc( szcfg + 1 );
+      strcpy( OBSINFO.ocsconfig, ocsconfig );
     }
 
     /* Store dynamic receptor information */
@@ -1690,6 +1705,18 @@ openNDF( const obsData * obsinfo, const subSystem * template, subSystem * file,
   file->curpos = 0;
   file->curseq = 0;
 
+  /* And the OCSConfig - do it here because it is a one off event and no resizing required*/
+  if ( obsinfo->ocsconfig != NULL ) {
+    HDSLoc * xloc = NULL;
+    HDSLoc * temploc = NULL;
+    ndfXnew( file->file.indf, "JCMTOCS", "OCSINFO", 0,NULL, &xloc, status );
+    datNew0C( xloc, "CONFIG", strlen(obsinfo->ocsconfig), status );
+    datFind( xloc, "CONFIG", &temploc, status);
+    datPut0C( temploc, obsinfo->ocsconfig, status );
+    datAnnul( &temploc, status );
+    datAnnul( &xloc, status );
+  }
+
   /* Create the ACSIS extension that contains the receptor names and
      positions */
   createACSISExtensions( obsinfo, file, ngrow, status );
@@ -2699,6 +2726,11 @@ static void freeResources ( obsData * obsinfo, subSystem * subsys, int * status)
     if (obsinfo->fplaney != NULL) {
       starFree( obsinfo->fplaney );
       obsinfo->fplaney = NULL;
+    }
+
+    if (obsinfo->ocsconfig != NULL) {
+      starFree( obsinfo->ocsconfig );
+      obsinfo->ocsconfig = NULL;
     }
   }
 

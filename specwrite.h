@@ -41,6 +41,8 @@
 *        Synchronize with jcmt/state.h
 *     01-FEB-2007 (TIMJ):
 *        Add acsSpecWriterVersion
+*     09-MAY-2007 (TIMJ):
+*        Add OCS config string to OpenTS
 
 *  Copyright:
 *     Copyright (C) 2006-2007 Particle Physics and Astronomy Research Council.
@@ -92,6 +94,7 @@ void acsSpecOpenTS( const char * dir,
 		    const char* focal_station,
 		    const float fplanex[],  /* Arcsec offsets in X, Y of */
 		    const float fplaney[],  /* each receptor. */
+		    const char* ocsconfig, /* XML configuration */
 		    int * status );
 
 /* Write a spectrum to the file */

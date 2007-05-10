@@ -23,9 +23,12 @@
 *        Original version.
 *     04-JAN-2006 (TIMJ):
 *        Use jcmt/state interface
+*     09-MAY-2007 (TIMJ):
+*        OCSCONFIG added to open
 
 *  Copyright:
 *     Copyright (C) 2006,2007 Particle Physics and Astronomy Research Council.
+*     Copyright (C) 2007 Science and Technology Facilities Council.
 *     All Rights Reserved.
 
 *  Licence:
@@ -115,6 +118,8 @@ static const char *recepnames[] = { "H01",
 };
 
 static const char focal_station[] = "DIRECT";
+
+static const char ocsconfig[] = "<OCS_CONFIG>\n</OCS_CONFIG>\n";
 
 const float fplanex[] = { 1.0f,2.0f,3.0f,4.0f,5.0f,6.0f,7.6f,8.2f,
 			  9.2f,10.f,11.f,12.f,13.f,14.f,15.f,16.f };
@@ -208,7 +213,7 @@ main ( void ) {
   }
 
   acsSpecOpenTS( ".", 20060607, 53, NRECEP, nsubsys, recepnames,
-		 focal_station, fplanex, fplaney, &status);
+		 focal_station, fplanex, fplaney, ocsconfig, &status);
   c = 0;
   spechdr.rts_endnum = 0;
 
