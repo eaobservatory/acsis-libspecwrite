@@ -1713,10 +1713,17 @@ openNDF( const obsData * obsinfo, const subSystem * template, subSystem * file,
     HDSLoc * temploc = NULL;
     size_t nlines;
     size_t nchars = 72; /* Standard internet line width */
+    size_t inlen;
     hdsdim dims[1];
-
+    
     /* Work out the number of lines and round it up to make sure there is enough space. */
-    nlines = (size_t)ceil( (double)strlen(obsinfo->ocsconfig) / (double)nchars );
+    inlen = strlen(obsinfo->ocsconfig);
+    if (inlen > nchars) {
+      nlines = (size_t)ceil( (double)inlen / (double)nchars );
+    } else {
+      nlines = 1;
+      nchars = inlen;
+    }
 
     /* create the extension and array component */
     ndfXnew( file->file.indf, "JCMTOCS", "OCSINFO", 0,NULL, &xloc, status );
