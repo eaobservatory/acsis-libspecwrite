@@ -1706,13 +1706,29 @@ openNDF( const obsData * obsinfo, const subSystem * template, subSystem * file,
   file->curseq = 0;
 
   /* And the OCSConfig - do it here because it is a one off event and no resizing required*/
+  /* Note that HDS does not allow a single scalar character to exceed 65535 bytes and so
+     we need to write the string as an array (even though the array size does not matter) */
   if ( obsinfo->ocsconfig != NULL ) {
     HDSLoc * xloc = NULL;
     HDSLoc * temploc = NULL;
+    size_t nlines;
+    size_t nchars = 72; /* Standard internet line width */
+    hdsdim dims[1];
+
+    /* Work out the number of lines and round it up to make sure there is enough space. */
+    nlines = (size_t)ceil( (double)strlen(obsinfo->ocsconfig) / (double)nchars );
+
+    /* create the extension and array component */
     ndfXnew( file->file.indf, "JCMTOCS", "OCSINFO", 0,NULL, &xloc, status );
-    datNew0C( xloc, "CONFIG", strlen(obsinfo->ocsconfig), status );
+    datNew1C( xloc, "CONFIG", nchars, nlines, status );
+
+    /* and write it - note the use of datPutC because we don't have a real array,
+       just a buffer that we are conning HDS with. */
     datFind( xloc, "CONFIG", &temploc, status);
-    datPut0C( temploc, obsinfo->ocsconfig, status );
+    dims[0] = nlines;
+    datPutC( temploc, 1, dims, obsinfo->ocsconfig, nchars, status );
+
+    /* tidy up */
     datAnnul( &temploc, status );
     datAnnul( &xloc, status );
   }
