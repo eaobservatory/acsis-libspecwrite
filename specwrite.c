@@ -1715,6 +1715,7 @@ openNDF( const obsData * obsinfo, const subSystem * template, subSystem * file,
     size_t nchars = 72; /* Standard internet line width */
     size_t inlen;
     hdsdim dims[1];
+    char * tempstr; /* padded storage */
     
     /* Work out the number of lines and round it up to make sure there is enough space. */
     inlen = strlen(obsinfo->ocsconfig);
@@ -1725,6 +1726,12 @@ openNDF( const obsData * obsinfo, const subSystem * template, subSystem * file,
       nchars = inlen;
     }
 
+    /* Since HDS does not pad the buffer we need to pad it here */
+    tempstr = starMalloc( (nlines * nchars) + 1);
+    strcpy( tempstr, obsinfo->ocsconfig );
+    memset( &(tempstr[inlen]), ' ', (nlines * nchars) - inlen );
+    tempstr[nlines*nchars] = '\0';
+
     /* create the extension and array component */
     ndfXnew( file->file.indf, "JCMTOCS", "OCSINFO", 0,NULL, &xloc, status );
     datNew1C( xloc, "CONFIG", nchars, nlines, status );
@@ -1733,9 +1740,10 @@ openNDF( const obsData * obsinfo, const subSystem * template, subSystem * file,
        just a buffer that we are conning HDS with. */
     datFind( xloc, "CONFIG", &temploc, status);
     dims[0] = nlines;
-    datPutC( temploc, 1, dims, obsinfo->ocsconfig, nchars, status );
+    datPutC( temploc, 1, dims, tempstr, nchars, status );
 
     /* tidy up */
+    starFree( tempstr );
     datAnnul( &temploc, status );
     datAnnul( &xloc, status );
   }
