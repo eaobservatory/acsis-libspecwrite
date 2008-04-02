@@ -34,7 +34,7 @@ AC_CHECK_SIZEOF(float)
 AC_CHECK_SIZEOF(double)
 AC_CHECK_SIZEOF(int)
 
-STAR_CNF_COMPATIBLE_SYMBOLS
+## STAR_CNF_COMPATIBLE_SYMBOLS
  
 dnl    Declare the build and use dependencies for this package
 STAR_DECLARE_DEPENDENCIES([build], [sae ems ndf hds cnf])
