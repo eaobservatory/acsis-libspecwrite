@@ -3767,7 +3767,7 @@ void acsSpecSetBackend ( backend_type type, int *status ) {
   if (INPROGRESS != 0) {
     *status = SAI__ERROR;
     emsRep("HDS_SPEC_SETBACKEND_ERR",
-	   "acsSpecSetBackendOpen called, yet an observation is already in progress", status);
+	   "acsSpecSetBackend called, yet an observation is already in progress", status);
     return;
   }
 
