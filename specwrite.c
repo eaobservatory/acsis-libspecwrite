@@ -1988,6 +1988,7 @@ static void writeRecord( void * basepntr[], unsigned int frame,
   STORE_STATE( tcs_az_bc2, TCS_AZ_BC2, double );
   STORE_CHAR( tcs_beam, TCS_BEAM, JCMT__SZTCS_BEAM );
   STORE_STATE( tcs_index, TCS_INDEX, int );
+  STORE_STATE( tcs_percent_cmp, TCS_PERCENT_CMP, int );
   STORE_CHAR( tcs_source, TCS_SOURCE, JCMT__SZTCS_SOURCE );
   STORE_CHAR( tcs_tr_sys, TCS_TR_SYS, JCMT__SZTCS_TR_SYS );
   STORE_STATE( tcs_tr_ang, TCS_TR_ANG, double );
