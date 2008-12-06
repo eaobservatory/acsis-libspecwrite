@@ -320,8 +320,7 @@ static size_t hdsRecordSizes[JCMT_COMP_NUM];
 #define NGROW  (MAXRATE * PRESIZETIME)
 
 /* Number of bytes we should accumulate before opening a new file */
-/*#define MAXBYTES ( 512 * 1024 * 1024 )*/
-static double maxbytes = 536870912;
+static double maxbytes = 512*1024*1024;
 
 /* if we have unfeasibly small spectra and 1 receptor we could get
    a very large requirement for memory for all the extensions
@@ -1240,7 +1239,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
        was supplied and we added a new sequence.
     */
     if (*status == SAI__OK && seqinc) {
-      if (subsys->curpos != 1 && subsys->curpos != (inpos + 1) ) {
+      if (subsys->curpos != 0 && subsys->curpos != 1 && subsys->curpos != (inpos + 1) ) {
         *status = SAI__ERROR;
         emsSetu( "IN", inpos);
         emsSetu( "OUT", subsys->curpos);
