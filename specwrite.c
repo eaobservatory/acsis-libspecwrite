@@ -1649,7 +1649,7 @@ openNDF( const obsData * obsinfo, const subSystem * template, subSystem * file,
   unsigned int ngrow;          /* Initial size to grow array */
   int place;                   /* NDF placeholder */
   int ubnd[NDIMS];             /* upper pixel bounds */
-  char * const  history[1] = { "Initial writing of raw data." };
+  const char * const  history[1] = { "Initial writing of raw data." };
 
   if (*status != SAI__OK) return;
 
@@ -3114,7 +3114,7 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
   char * stemp = NULL;     /* temporary pointer to string */
   int sysstat;             /* status from system call */
   char units[72];          /* Unit string from fits header BUNIT */
-  char * const history[1] = { "Finalise headers and make ICD compliant." };
+  const char * const history[1] = { "Finalise headers and make ICD compliant." };
   int   parlen = 0;        /* returned length of param */
   char  param[EMS__SZPAR+1]; /* temp buffer for EMS param name */
   int   oplen  = 0;       /* returned length of errbuff */
