@@ -3127,6 +3127,11 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
     "DATE-OBS", "OBSGEO-X", "OBSGEO-Y", "OBSGEO-Z", "SSYSOBS", "DUT1", NULL
   };
 
+  /* headers to be deleted after WCS is extracted */
+  const char * delfits[] = {
+    "MJD-AVG", "END", NULL
+  };
+
   if (*status != SAI__OK) return;
 
   /* do nothing if we have null pointer */
@@ -3213,10 +3218,16 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
       strcpy( units, "uncalibrated" );
     }
 
-    /* Remove the END card */
-    astClear( lfits, "Card" );
-    if (astFindFits( lfits, "END", NULL, 0 ) ) {
-      astDelFits( lfits );
+    /* Remove cards that should not end up in the output header */
+    j = 0;
+    while ( delfits[j] != NULL ) {
+      /* clearing each time is not very efficient but I don't want
+         to burn in the ordering */
+      astClear( lfits, "Card" );
+      if (astFindFits( lfits, delfits[j], NULL, 0 ) ) {
+        astDelFits( lfits );
+      }
+      j++;
     }
 
     /* Determine whether we had an AZEL or non-AZEL (TRACKING) cube. This is important for the
