@@ -26,6 +26,8 @@ missing
 spwTest
 stamp-h1
 starconf.status
+*.ok
+.*.ok
 
 # Mac OSX
 *.dSYM
