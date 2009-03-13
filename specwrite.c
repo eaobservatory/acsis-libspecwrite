@@ -2989,10 +2989,10 @@ void writeFlagFile (const obsData * obsinfo, const subSystem subsystems[],
      is complete. */
 
   flen = snprintf(tmpok, MAXFILE,
-#if HAVE_MKSTEMPS
-                  "%s/tempXXXXXX.ok",
-#elif HAVE_MKSTEMP
+#if HAVE_MKSTEMP
                   "%s/tempXXXXXX",
+#else
+  UNABLE TO CREATE TEMPORARY FILE
 #endif
                   obsinfo->rootdir );
   if (flen >= MAXFILE && status == SAI__OK) {
@@ -3003,9 +3003,7 @@ void writeFlagFile (const obsData * obsinfo, const subSystem subsystems[],
 
   /* get a temporary file */
   if (*status == SAI__OK) {
-#if HAVE_MKSTEMPS
-    fd = mkstemps( tmpok, 3 ); /* .ok is 3 characters */
-#elif HAVE_MKSTEMP
+#if HAVE_MKSTEMP
     fd = mkstemp( tmpok );
 #else
     UNABLE TO CREATE A TEMPORARY FILE
