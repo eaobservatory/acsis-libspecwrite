@@ -3523,7 +3523,7 @@ AstFrameSet *specWcs( AstFrameSet * fs, const char veldef[], int ntime, const do
   } else {
     /* create simple channel number */
     specfrm = astFrame( 1, "Domain=CHANNEL,Unit(1)=pixel,Label(1)=Channel Number" );
-    specmap = (AstMapping*)astUnitMap( 1, "" );
+    specmap = (AstMapping*)astUnitMap( 1, " " );
   }
 
   /* We will use a simple Frame to describe the spatial axis, giving it the
@@ -3531,7 +3531,7 @@ AstFrameSet *specWcs( AstFrameSet * fs, const char veldef[], int ntime, const do
      The values on the spatial axis are just copies fo the grid coordinate,
      so create a UnitMap to connect the GRID Frame to the SPACEINDEX Frame. */
   spacefrm = astFrame( 1, "Domain=SPACEINDEX,Unit(1)=pixel,Label(1)=Receptor Number" );
-  spacemap = astUnitMap( 1, "" );
+  spacemap = astUnitMap( 1, " " );
 
   /* We now have the SpecFrame, and the Mapping from grid coord to spectral
      coord. Now create a TimeFrame to describe MJD in the TAI timescale, and
@@ -3569,7 +3569,7 @@ AstFrameSet *specWcs( AstFrameSet * fs, const char veldef[], int ntime, const do
     astSet(timefrm, "format=iso.0");
   }
 
-  timemap = astLutMap( ntime, ltimes, 1.0, 1.0, "" );
+  timemap = astLutMap( ntime, ltimes, 1.0, 1.0, " " );
 
   /* if we have ObsLon and ObsLat available in the SpecFrame
      we store those in the time frame so that we can calculate
@@ -3592,8 +3592,8 @@ AstFrameSet *specWcs( AstFrameSet * fs, const char veldef[], int ntime, const do
      axes. Join all the Frames together into a CmpFrame (in the order spectral,
      spatial, time), and join all the Mappings together into a parallel
      CmpMap. */
-  totfrm = astCmpFrame( astCmpFrame( specfrm, spacefrm, "" ), timefrm, "" );
-  totmap = astCmpMap( astCmpMap( specmap, spacemap, 0, "" ), timemap, 0, "" );
+  totfrm = astCmpFrame( astCmpFrame( specfrm, spacefrm, " " ), timefrm, " " );
+  totmap = astCmpMap( astCmpMap( specmap, spacemap, 0, " " ), timemap, 0, " " );
 
   /* Create a 3D GRID Frame. */
   gridfrm = astFrame( 3, "Domain=GRID,Title=FITS pixel coordinates" );
@@ -3603,7 +3603,7 @@ AstFrameSet *specWcs( AstFrameSet * fs, const char veldef[], int ntime, const do
 
   /* Create the FrameSet to return, initially containing just the above
      GRID Frame. */
-  result = astFrameSet( gridfrm, "" );
+  result = astFrameSet( gridfrm, " " );
 
   /* Add the total Frame into the FrameSet using the total Mapping to
      connect it to the base (i.e. GRID) Frame. */
