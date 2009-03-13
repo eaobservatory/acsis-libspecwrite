@@ -29,5 +29,9 @@ starconf.status
 *.ok
 .*.ok
 
+# Editor temp files
+*~
+
 # Mac OSX
 *.dSYM
+._*
