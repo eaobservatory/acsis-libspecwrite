@@ -3567,8 +3567,10 @@ AstFrameSet *specWcs( AstFrameSet * fs, const char veldef[], int ntime, const do
     astSet( timefrm, "ObsLon=%s,ObsLat=%s", astGetC( specfrm, "ObsLon" ),
             astGetC( specfrm, "ObsLat") );
 
-  /* similarly if DUT1 is defined */
-  if (astTest( fs, "dut1" )) astSet( timefrm, "dut1=%s", astGetC(fs, "dut1"));
+  /* similarly if DUT1 is defined - if no frameset we assume no dut1 */
+  if (fs && astTest( fs, "dut1" )) {
+    astSet( timefrm, "dut1=%s", astGetC(fs, "dut1"));
+  }
 
   /* set local time offset */
   astSetD( timefrm, "LToffset", acs_tzoffset() );
