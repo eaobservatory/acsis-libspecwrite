@@ -48,6 +48,12 @@
 
 #define SPD 86400.0   /* Seconds per day */
 
+/* Are we writing NDF history explicitly? Within SMURF we do not want to do that
+   since history will be controlled at a higher level */
+#ifndef PACKAGE_UPCASE
+# define SPECWRITE_WRITE_HISTORY
+#endif
+
 /* Debug prints
    0 - disabled
    1 - standard debug 
@@ -1649,7 +1655,9 @@ openNDF( const obsData * obsinfo, const subSystem * template, subSystem * file,
   unsigned int ngrow;          /* Initial size to grow array */
   int place;                   /* NDF placeholder */
   int ubnd[NDIMS];             /* upper pixel bounds */
+#ifdef SPECWRITE_WRITE_HISTORY
   const char * const  history[1] = { "Initial writing of raw data." };
+#endif
 
   if (*status != SAI__OK) return;
 
@@ -1707,7 +1715,7 @@ openNDF( const obsData * obsinfo, const subSystem * template, subSystem * file,
 
   /* History component - inside SMURF we want ADAM to write the history */
   ndfHcre( file->file.indf, status );
-#ifndef PACKAGE_UPCASE
+#ifdef SPECWRITE_WRITE_HISTORY
   ndfHput("NORMAL",APPNAME, 1, 1, history,
           0, 0, 0, file->file.indf, status );
 #endif
@@ -3112,7 +3120,9 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
   char * stemp = NULL;     /* temporary pointer to string */
   int sysstat;             /* status from system call */
   char units[72];          /* Unit string from fits header BUNIT */
+#ifdef SPECWRITE_WRITE_HISTORY
   const char * const history[1] = { "Finalise headers and make ICD compliant." };
+#endif
   int   parlen = 0;        /* returned length of param */
   char  param[EMS__SZPAR+1]; /* temp buffer for EMS param name */
   int   oplen  = 0;       /* returned length of errbuff */
@@ -3316,7 +3326,7 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
       /* easiest to write a second piece of history information for header collation.
          Stops having to worry about only getting a single HISTORY entry when NDF
          wants to write a new entry every time the file is opened for UPDATE. */
-#ifndef PACKAGE_UPCASE
+#ifdef SPECWRITE_WRITE_HISTORY
       ndfHput("NORMAL",APPNAME, 1, 1, history,
               0, 0, 0, indf, status );
 #endif
