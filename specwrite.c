@@ -237,8 +237,11 @@ static int hasSeqSpectra( const obsData * obsinfo, subSystem * subsys,
 void writeFlagFile (const obsData * obsinfo, const subSystem subsystems[],
                     int * status);
 
-void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
-                      AstFitsChan * const fits[], int badfits[], char errbuff[], int * status);
+void writeOneWCSandFITS (const obsData * obsinfo, const subSystem subsys,
+			 AstFitsChan * const fits, int * badfits, char errbuff[], int * status);
+
+void writeAllWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
+			 AstFitsChan * const fits[], int badfits[], char errbuff[], int * status);
 
 static
 AstFrameSet *specWcs( AstFrameSet *fs, const char veldef[], int ntime, const double times[], int * status );
@@ -665,7 +668,8 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
  *  Invocation:
  *     result = acsSpecWriteTS( unsigned int subsys, unsigned int nchans, 
  *                     const float spectrum[], const JCMTState * record, 
- *                     const ACSISSpecHdr * spechdr, int * status);
+ *                     const ACSISSpecHdr * spechdr, AstFitsChan * const fits,
+ *                     int * status);
 
  *  Language:
  *     Starlink ANSI C
@@ -687,6 +691,8 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
  *        JCMT state information associated with this spectrum
  *     spechdr = const ACSISSpecHdr * (Given)
  *        ACSIS spectrum-specific information.
+ *     fits = AstFitsChan * const (Given)
+ *        FITS headers for this subsystem.
  *     status = int * (Given & Returned)
  *        Inherited status.
 
@@ -745,7 +751,7 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
 int
 acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectrum[], 
                 const JCMTState * record, const ACSISSpecHdr * spechdr,
-                int * status ) {
+                AstFitsChan * const fits, int * status ) {
 
   float * data; /* local copy of mapped pointer to spectrum */
   unsigned int offset;         /* offset into data array */
@@ -769,6 +775,9 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
   void ** recdata;
   unsigned int startind;
   subSystem * subsys;
+
+  int badfits;                /* Was there a bad FITS header? */
+  char errbuff[EMS__SZMSG+1]; /* fits error message from AST */
 
   JCMTState  state;        /* local editable copy of state information */
   ACSISSpecHdr acshdr;     /* local editable copy of acsis hdr */
@@ -1083,6 +1092,13 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 #endif
         flushResources( &OBSINFO, subsys, status );
 
+	/* if FITS headers were given, write the WCS coordinates,
+	   FITS headers and flag file */
+	if (fits != NULL) {
+	  writeOneWCSandFITS( &OBSINFO, *subsys, fits, &badfits, errbuff, status);
+	  //writeFlagFile( &OBSINFO, SUBSYS, status);
+	}
+
         /* always want to make sure we allocate the max amount of memory */
         ngrow = subsys->maxsize;
 
@@ -1226,6 +1242,13 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
                    " %u sequence steps <<<<<<<<\n", subsys->seqlen);
 #endif
             flushResources( &OBSINFO, subsys, status );
+
+	    /* if FITS headers were given, write the WCS coordinates,
+	       FITS headers and flag file */
+	    if (fits != NULL) {
+	      writeOneWCSandFITS( &OBSINFO, *subsys, fits, &badfits, errbuff, status);
+	      //writeFlagFile( &OBSINFO, SUBSYS, status);
+	    }
 
             /* Do not call allocResources() since we might not get
                another spectrum */
@@ -1398,7 +1421,7 @@ acsSpecCloseTS( AstFitsChan * const fits[], int incArchiveBounds, int * status )
   astShow( fits[0] );
 #endif
 
-  writeWCSandFITS( &OBSINFO, SUBSYS, fits, badfits, errbuff, &lstat );
+  writeAllWCSandFITS( &OBSINFO, SUBSYS, fits, badfits, errbuff, &lstat );
 
   /* Write the flag file contents */
 
@@ -3073,13 +3096,6 @@ void writeFlagFile (const obsData * obsinfo, const subSystem subsystems[],
   okfile = getOkFileName( obsinfo->rootdir, obsinfo->yyyymmdd,
                           obsinfo->obsnum, status );
 
-  /* Sanity check - want to make sure that we do not open a file that
-     is already there. There could be a race condition between the
-     check and the rename() but that should be impossible in normal DA
-     usage so we ignore the possibility.
-  */
-  checkNoFileExists( okfile, status );
-
   if (*status == SAI__OK) {
     sysstat = rename(tmpok, okfile);
     if (sysstat == -1) {
@@ -3097,15 +3113,14 @@ void writeFlagFile (const obsData * obsinfo, const subSystem subsystems[],
   return;
 }
 
-void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
-                      AstFitsChan * const fits[], int badfits[], 
-                      char errbuff[], int * status) {
+
+void writeOneWCSandFITS (const obsData * obsinfo, const subSystem subsys,
+			 AstFitsChan * const fits, int * badfits, 
+			 char errbuff[], int * status) {
 
   char * fname;             /* file name of a given subscan */
-  unsigned int i;           /* Loop counter */
   int          indf;        /* NDF identifier */
   unsigned int j;           /* Loop counter */
-  const subSystem * subsys = NULL; /* Current subsystem */
   int          place;       /* unused NDF placeholder */
   AstFitsChan * lfits = NULL; /* Local copy of FITS header */
   int *        oldstat;     /* Internal AST status on entry */
@@ -3151,214 +3166,202 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
   /* Start an AST context so we do not need to annul AST pointers explicitly. */
   astBegin;
 
-  /* loop over each sub system and open each subscan */
+  /* Extract astrometry from a local copy (so we do not damage the fitschan
+     provided to use - this can be done outside the subscan loop */
+  lfits = astCopy( fits );
 
-  /* repeat code in flag file function rather than have a separate
-     routine that populates an array of strings (or even store those
-     filenames in the subsys struct itself). This is just laziness */
-
-  for (i = 0; i < obsinfo->nsubsys; i++) {
-    /* local subsystem */
-    subsys = &(subsystems[i]);
-
-    /* Extract astrometry from a local copy (so we do not damage the fitschan
-       provided to use - this can be done outside the subscan loop */
-    lfits = astCopy( fits[i] );
-
-    /* extract astrometry from the FITS header. We do this first so that we can
-       decide whether we are writing a FITS header with extracted astrometry
-       or whether we are using the supplied header (for debugging purposes).
-       - in the event of failure we should flag the occurence but soldier
-       on since we need to write the data even if the FITS headers are dodgy
-       and write the original FITS header to the file.
-       The caller can then trigger the error state.
-    */
-    badfits[i] = 0;  /* assume ok */
-    astClear( lfits, "Card" );
-    wcs = NULL;
-    if (*status == SAI__OK) {
-      /* Mark some headers to be retained after stripping */
-      j = 0;
-      while ( retainfits[j] != NULL ) {
-        /* clearing each time is not very efficient but I don't want
-           to burn in the ordering */
-        astClear( lfits, "Card" );
-        if (astFindFits( lfits, retainfits[j], NULL, 0 ) ) {
-          astRetainFits( lfits );
-        }
-        j++;
-      }
-
-      /* Rewind before parsing */
-      astClear(lfits,"Card");
-      wcs = astRead( lfits );
-      if (*status != SAI__OK) {
-        /* copy the second (! - since we do not want the linenumber)
-           AST message from stack into buffer */
-        emsEload( param, &parlen, errbuff, &oplen, status );
-        emsEload( param, &parlen, errbuff, &oplen, status );
-        emsAnnul( status );
-        /* get new copy to write full unmodified header */
-        lfits = astCopy( fits[i] );
-        badfits[i] = 1;
-      }
-    }
-
-    /* work out the data units from BUNIT */
-    astClear( lfits, "Card");
-    tempscal = 0;
-    if ( astGetFitsS( lfits, "BUNIT", &stemp ) ) {
-      /* take copy and decide whether this is a temperature scale (we know it is terminated) */
-      strcpy( units, stemp );
-      if (strcmp("K", stemp) == 0) tempscal = 1;
-      astDelFits( lfits );
-
-      /* and look for a TEMPSCAL fits header  - which should be undef by default and
-         so can stay undef if we are uncalibrated. If it is missing do not fill it in. */
-      if (tempscal) {
-        astClear( lfits, "Card" );
-        if ( astFindFits( lfits, FITS_TEMPSCAL, NULL, 0 ) ) {
-          astSetFitsS(lfits, FITS_TEMPSCAL, "TA*", "Temperature scale in use", 1);
-        }
-      }
-    } else {
-      /* not calibrated */
-      strcpy( units, "uncalibrated" );
-    }
-
-    /* Remove cards that should not end up in the output header */
+  /* extract astrometry from the FITS header. We do this first so that we can
+     decide whether we are writing a FITS header with extracted astrometry
+     or whether we are using the supplied header (for debugging purposes).
+     - in the event of failure we should flag the occurence but soldier
+     on since we need to write the data even if the FITS headers are dodgy
+     and write the original FITS header to the file.
+     The caller can then trigger the error state.
+  */
+  *badfits = 0;  /* assume ok */
+  astClear( lfits, "Card" );
+  wcs = NULL;
+  if (*status == SAI__OK) {
+    /* Mark some headers to be retained after stripping */
     j = 0;
-    while ( delfits[j] != NULL ) {
+    while ( retainfits[j] != NULL ) {
       /* clearing each time is not very efficient but I don't want
-         to burn in the ordering */
+	 to burn in the ordering */
       astClear( lfits, "Card" );
-      if (astFindFits( lfits, delfits[j], NULL, 0 ) ) {
-        astDelFits( lfits );
+      if (astFindFits( lfits, retainfits[j], NULL, 0 ) ) {
+	astRetainFits( lfits );
       }
       j++;
     }
 
-    /* Determine whether we had an AZEL or non-AZEL (TRACKING) cube. This is important for the
-       definition of RECEPPOS coordinates. Bit of a hack but it's easier (For now) than changing
-       the API or acsSpecOpenTS. */
-    strcpy(receppos_sys, "TRACKING");
-    if (wcs) {
-      skysys = astGetC( wcs, "SYSTEM(1)");
-      if (strcmp(skysys, "AZEL") == 0) {
-        strcpy(receppos_sys, "AZEL");
-      }
+    /* Rewind before parsing */
+    astClear(lfits,"Card");
+    wcs = astRead( lfits );
+    if (*status != SAI__OK) {
+      /* copy the second (! - since we do not want the linenumber)
+	 AST message from stack into buffer */
+      emsEload( param, &parlen, errbuff, &oplen, status );
+      emsEload( param, &parlen, errbuff, &oplen, status );
+      emsAnnul( status );
+      /* get new copy to write full unmodified header */
+      lfits = astCopy( fits );
+      *badfits = 1;
     }
-
-    /* subscans start counting at 1 */
-    for (j = 1; j <= subsys->file.subscan ; j++ ) {
-      /* need full path of file */
-      fname = getFileName( obsinfo->datadir, obsinfo->yyyymmdd, i+1,
-                           obsinfo->obsnum, j, status );
-
-      /* open the NDF */
-#if SPW_DEBUG_LEVEL > 0
-      printf("Writing file FITS header %s\n", fname );
-#endif
-      if (fname != NULL) 
-        ndfOpen( NULL, fname, "UPDATE", "OLD", &indf, &place, status );
-
-      /* add the SUBSCAN number to the header - forcing one if not present */
-      astClear( lfits, "Card" );
-      astFindFits( lfits, FITS_NSUBSCAN, NULL, 0 );
-      astSetFitsI( lfits, FITS_NSUBSCAN, (int)j, "Sub-scan number", 1);
-
-      /* need to add a OBSEND number to the header. True if
-         this is the last file */
-      astClear( lfits, "Card" );
-      astFindFits( lfits, FITS_OBSEND, NULL, 0 );
-      astSetFitsL( lfits, FITS_OBSEND,
-                   ( j == subsys->file.subscan ? 1 : 0 ),
-                   "True if file is last in current observation", 1);
-
-      /* Attach units to NDF */
-      ndfCput( units, indf, "UNITS", status );
-
-      /* attach a data label */
-      if (tempscal) {
-        /* Note the use of AST control codes for subscript/superscript */
-        ndfCput( "T%s60+%v30+A%^50+%<20+*%+   corrected antenna temperature", indf, "LABEL", status );
-      } else {
-        ndfCput( "Power", indf, "LABEL", status );
-      }
-
-      /* Bounds associated with this file */
-
-
-      /* Build up the frameset from the FITS header and the time series */
-
-      /* need the time information */
-      ndfXloc( indf, STATEEXT, "READ", &xloc, status );
-      datFind( xloc, "TCS_TAI", &tloc, status );
-      
-      datMapV( tloc, "_DOUBLE", "READ", &tpntr, &tsize, status );
-      tdata = tpntr;
-
-      /* when we get the spectral WCS we would like to make sure that it defaults to a velocity
-         frame rather than frequency frame. We therefore need the DOPPLER fits header (bad name) */
-      astClear( lfits, "Card");
-      veldef[0] = '\0';
-      if ( astGetFitsS( lfits, "DOPPLER", &stemp ) ) {
-        strcpy( veldef, stemp );
-      }
-
-      /* calculate the frameset */
-      specwcs = specWcs( wcs, veldef, (int)tsize, tdata, status);
-
-      /* clean up */
-      datUnmap( tloc, status );
-      datAnnul( &tloc, status );
-      datAnnul( &xloc, status );
-
-      /* Write WCS */
-      ndfPtwcs( specwcs, indf, status );
-
-      /* free the new WCS object */
-      specwcs = astAnnul( specwcs );
-
-      /* write FITS header */
-      acs_kpgPtfts( indf, lfits, status );
-
-      /* easiest to write a second piece of history information for header collation.
-         Stops having to worry about only getting a single HISTORY entry when NDF
-         wants to write a new entry every time the file is opened for UPDATE. */
-#ifdef SPECWRITE_WRITE_HISTORY
-      ndfHput("NORMAL",APPNAME, 1, 1, history,
-              0, 0, 0, indf, status );
-#endif
-
-      /* Need ACSIS extension for hack */
-      ndfXpt0c( receppos_sys, indf, ACSISEXT, "RECEPPOS_SYS", status );
-
-      /* close file */
-      ndfAnnul( &indf, status );
-
-      /* we may want to set permissions on the file to stop unwary people overwriting it
-         or even the acquisition system itself. */
-      if (*status == SAI__OK) {
-        sysstat = chmod( fname, S_IRUSR | S_IWUSR| S_IRGRP | S_IROTH );
-        if (sysstat == -1) {
-          *status = SAI__ERROR;
-          emsSyser( "ERRNO", errno );
-          emsSetc( "FILE", fname );
-          emsRep(" ","acsSpecCloseTS: Error setting permissions on file ^FILE: ^ERRNO",
-                 status );
-        }
-      }
-
-    }
-
-    /* free the copy of the FITS header */
-    lfits = astAnnul( lfits );
-
-    /* free the FITS header wcs */
-    if (wcs) wcs = astAnnul(wcs);
-
   }
+
+  /* work out the data units from BUNIT */
+  astClear( lfits, "Card");
+  tempscal = 0;
+  if ( astGetFitsS( lfits, "BUNIT", &stemp ) ) {
+    /* take copy and decide whether this is a temperature scale (we know it is terminated) */
+    strcpy( units, stemp );
+    if (strcmp("K", stemp) == 0) tempscal = 1;
+    astDelFits( lfits );
+
+    /* and look for a TEMPSCAL fits header  - which should be undef by default and
+       so can stay undef if we are uncalibrated. If it is missing do not fill it in. */
+    if (tempscal) {
+      astClear( lfits, "Card" );
+      if ( astFindFits( lfits, FITS_TEMPSCAL, NULL, 0 ) ) {
+	astSetFitsS(lfits, FITS_TEMPSCAL, "TA*", "Temperature scale in use", 1);
+      }
+    }
+  } else {
+    /* not calibrated */
+    strcpy( units, "uncalibrated" );
+  }
+
+  /* Remove cards that should not end up in the output header */
+  j = 0;
+  while ( delfits[j] != NULL ) {
+    /* clearing each time is not very efficient but I don't want
+       to burn in the ordering */
+    astClear( lfits, "Card" );
+    if (astFindFits( lfits, delfits[j], NULL, 0 ) ) {
+      astDelFits( lfits );
+    }
+    j++;
+  }
+
+  /* Determine whether we had an AZEL or non-AZEL (TRACKING) cube. This is important for the
+     definition of RECEPPOS coordinates. Bit of a hack but it's easier (For now) than changing
+     the API or acsSpecOpenTS. */
+  strcpy(receppos_sys, "TRACKING");
+  if (wcs) {
+    skysys = astGetC( wcs, "SYSTEM(1)");
+    if (strcmp(skysys, "AZEL") == 0) {
+      strcpy(receppos_sys, "AZEL");
+    }
+  }
+
+  /* subscans start counting at 1 */
+  for (j = 1; j <= subsys.file.subscan ; j++ ) {
+    /* need full path of file */
+    fname = getFileName( obsinfo->datadir, obsinfo->yyyymmdd, subsys.index,
+			 obsinfo->obsnum, j, status );
+
+    /* open the NDF */
+#if SPW_DEBUG_LEVEL > 0
+    printf("Writing file FITS header %s\n", fname );
+#endif
+    if (fname != NULL) 
+      ndfOpen( NULL, fname, "UPDATE", "OLD", &indf, &place, status );
+
+    /* add the SUBSCAN number to the header - forcing one if not present */
+    astClear( lfits, "Card" );
+    astFindFits( lfits, FITS_NSUBSCAN, NULL, 0 );
+    astSetFitsI( lfits, FITS_NSUBSCAN, (int)j, "Sub-scan number", 1);
+
+    /* need to add a OBSEND number to the header. True if
+       this is the last file */
+    astClear( lfits, "Card" );
+    astFindFits( lfits, FITS_OBSEND, NULL, 0 );
+    astSetFitsL( lfits, FITS_OBSEND,
+		 ( j == subsys.file.subscan ? 1 : 0 ),
+		 "True if file is last in current observation", 1);
+
+    /* Attach units to NDF */
+    ndfCput( units, indf, "UNITS", status );
+
+    /* attach a data label */
+    if (tempscal) {
+      /* Note the use of AST control codes for subscript/superscript */
+      ndfCput( "T%s60+%v30+A%^50+%<20+*%+   corrected antenna temperature", indf, "LABEL", status );
+    } else {
+      ndfCput( "Power", indf, "LABEL", status );
+    }
+
+    /* Bounds associated with this file */
+
+
+    /* Build up the frameset from the FITS header and the time series */
+
+    /* need the time information */
+    ndfXloc( indf, STATEEXT, "READ", &xloc, status );
+    datFind( xloc, "TCS_TAI", &tloc, status );
+      
+    datMapV( tloc, "_DOUBLE", "READ", &tpntr, &tsize, status );
+    tdata = tpntr;
+
+    /* when we get the spectral WCS we would like to make sure that it defaults to a velocity
+       frame rather than frequency frame. We therefore need the DOPPLER fits header (bad name) */
+    astClear( lfits, "Card");
+    veldef[0] = '\0';
+    if ( astGetFitsS( lfits, "DOPPLER", &stemp ) ) {
+      strcpy( veldef, stemp );
+    }
+
+    /* calculate the frameset */
+    specwcs = specWcs( wcs, veldef, (int)tsize, tdata, status);
+
+    /* clean up */
+    datUnmap( tloc, status );
+    datAnnul( &tloc, status );
+    datAnnul( &xloc, status );
+
+    /* Write WCS */
+    ndfPtwcs( specwcs, indf, status );
+
+    /* free the new WCS object */
+    specwcs = astAnnul( specwcs );
+
+    /* write FITS header */
+    acs_kpgPtfts( indf, lfits, status );
+
+    /* easiest to write a second piece of history information for header collation.
+       Stops having to worry about only getting a single HISTORY entry when NDF
+       wants to write a new entry every time the file is opened for UPDATE. */
+#ifdef SPECWRITE_WRITE_HISTORY
+    ndfHput("NORMAL",APPNAME, 1, 1, history,
+	    0, 0, 0, indf, status );
+#endif
+
+    /* Need ACSIS extension for hack */
+    ndfXpt0c( receppos_sys, indf, ACSISEXT, "RECEPPOS_SYS", status );
+
+    /* close file */
+    ndfAnnul( &indf, status );
+
+    /* we may want to set permissions on the file to stop unwary people overwriting it
+       or even the acquisition system itself. */
+    if (*status == SAI__OK) {
+      sysstat = chmod( fname, S_IRUSR | S_IWUSR| S_IRGRP | S_IROTH );
+      if (sysstat == -1) {
+	*status = SAI__ERROR;
+	emsSyser( "ERRNO", errno );
+	emsSetc( "FILE", fname );
+	emsRep(" ","acsSpecCloseTS: Error setting permissions on file ^FILE: ^ERRNO",
+	       status );
+      }
+    }
+    
+  }
+
+  /* free the copy of the FITS header */
+  lfits = astAnnul( lfits );
+
+  /* free the FITS header wcs */
+  if (wcs) wcs = astAnnul(wcs);
 
   /* End the AST context. This annuls all AST Objects pointers created since
      the matching call to astBegin, except for any which have been exempted
@@ -3367,6 +3370,30 @@ void writeWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
 
   /* Reset AST status */
   astWatch( oldstat );
+
+  return;
+}
+
+void writeAllWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
+			 AstFitsChan * const fits[], int badfits[], 
+			 char errbuff[], int * status) {
+
+  int i; /* loop counter */
+
+  /* headers to be retained */
+  if (*status != SAI__OK) return;
+
+  /* do nothing if we have null pointer */
+  if (fits == NULL) return;
+
+  /* loop over each sub system and open each subscan */
+
+  for (i = 0; i < obsinfo->nsubsys; i++) {
+    /* local subsystem */
+
+    writeOneWCSandFITS (obsinfo, subsystems[i], fits[i], &badfits[i],
+			errbuff, status);
+  }
 
   return;
 }

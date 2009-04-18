@@ -110,6 +110,7 @@ int acsSpecWriteTS( unsigned int subsys,
 		    const float spectrum[],
 		    const JCMTState * record,
 		    const ACSISSpecHdr * spechdr,
+		    AstFitsChan * const fits,
 		    int * status );
 
 /* Close the file */
