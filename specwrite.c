@@ -235,7 +235,7 @@ static int hasSeqSpectra( const obsData * obsinfo, subSystem * subsys,
                           unsigned int tindex, int * status );
 
 void writeFlagFile (const obsData * obsinfo, const subSystem subsystems[],
-                    int * status);
+                    int flagfile_length, char * flagfile_name, int * status);
 
 void writeOneWCSandFITS (const obsData * obsinfo, const subSystem subsys,
 			 AstFitsChan * const fits, int * badfits, char errbuff[], int * status);
@@ -1096,7 +1096,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 	   FITS headers and flag file */
 	if (fits != NULL) {
 	  writeOneWCSandFITS( &OBSINFO, *subsys, fits, &badfits, errbuff, status);
-	  //writeFlagFile( &OBSINFO, SUBSYS, status);
+	  //writeFlagFile( &OBSINFO, SUBSYS, 0, 0, status);
 	}
 
         /* always want to make sure we allocate the max amount of memory */
@@ -1247,7 +1247,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
 	       FITS headers and flag file */
 	    if (fits != NULL) {
 	      writeOneWCSandFITS( &OBSINFO, *subsys, fits, &badfits, errbuff, status);
-	      //writeFlagFile( &OBSINFO, SUBSYS, status);
+	      //writeFlagFile( &OBSINFO, SUBSYS, 0, 0, status);
 	    }
 
             /* Do not call allocResources() since we might not get
@@ -1309,6 +1309,10 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
  *        Array of FITS headers. One per subsystem.
  *     incArchiveBounds = int (Given)
  *        If true, bounds FITS keywords will be calculated.
+ *     flagfile_length = int (Given)
+ *        Length of the buffer for the location of the flag file.
+ *     flagfile_name = char * (Returned)
+ *        The location of the flag file.
  *     status = int * (Given & Returned)
  *        Inherited status.
 
@@ -1356,7 +1360,8 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
  */
 
 void
-acsSpecCloseTS( AstFitsChan * const fits[], int incArchiveBounds, int * status ) {
+acsSpecCloseTS( AstFitsChan * const fits[], int incArchiveBounds, int flagfile_length,
+                char * flagfile_name, int * status ) {
 
   unsigned int i;           /* Loop counter */
   int found = 0;            /* Found an open NDF? */
@@ -1425,7 +1430,7 @@ acsSpecCloseTS( AstFitsChan * const fits[], int incArchiveBounds, int * status )
 
   /* Write the flag file contents */
 
-  writeFlagFile( &OBSINFO, SUBSYS, &lstat);
+  writeFlagFile( &OBSINFO, SUBSYS, flagfile_length, flagfile_name, &lstat);
 
   /* Check whether local status should be set bad because of a dodgy FITS header */
   if (lstat == SAI__OK) {
@@ -3000,7 +3005,7 @@ static int hasAllSpectraCareful( const obsData * obsinfo, const subSystem * subs
 /* Write the OK flag file and content */
 
 void writeFlagFile (const obsData * obsinfo, const subSystem subsystems[],
-                    int * status) {
+                    int flagfile_length, char * flagfile_name, int * status) {
 
   int fd;                   /* file descriptor of temp ok file */
   FILE * fstream = NULL;    /* Stream associated with temp ok file */
@@ -3110,6 +3115,12 @@ void writeFlagFile (const obsData * obsinfo, const subSystem subsystems[],
   /* close temporary file descriptor and stream (even if bad status) */
   if (fstream) fclose( fstream ); /* also closes fd */
 
+  /* store the location of the flag file in the given buffer */
+  if (flagfile_name) {
+    strncpy(flagfile_name, okfile, flagfile_length);
+    flagfile_name[flagfile_length - 1] = '\0';
+  }
+  
   return;
 }
 

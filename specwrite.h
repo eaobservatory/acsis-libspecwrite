@@ -116,6 +116,8 @@ int acsSpecWriteTS( unsigned int subsys,
 /* Close the file */
 void acsSpecCloseTS( AstFitsChan * const fits[],
 		     int incArchiveBounds,
+		     int flagfile_length,
+		     char * flagfile_name,
 		     int * status );
 
 /* Library version number */
