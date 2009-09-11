@@ -3025,11 +3025,7 @@ void writeFlagFile (const obsData * obsinfo, const subSystem subsystems[],
      is complete. */
 
   flen = snprintf(tmpok, MAXFILE,
-#if HAVE_MKSTEMP
                   "%s/tempXXXXXX",
-#else
-  UNABLE TO CREATE TEMPORARY FILE
-#endif
                   obsinfo->rootdir );
   if (flen >= MAXFILE && status == SAI__OK) {
     *status = SAI__ERROR;
