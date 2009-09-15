@@ -193,7 +193,7 @@ main ( void ) {
   spechdr.acs_tsys = 52.8;
   spechdr.acs_trx = 256.7;
   strcpy(record.tcs_source, "SCIENCE");
-  *(record.tcs_tr_sys) = '\0';
+  strcpy(record.tcs_tr_sys, "J2000");
   strcpy(record.acs_source_ro, "SPECTRUM_RESULT");
   record.acs_no_prev_ref = 1;
   record.acs_no_next_ref = 1;
