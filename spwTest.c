@@ -258,7 +258,7 @@ main ( void ) {
 
   /* Now close up */
   gettimeofday(&tp1, NULL);
-  acsSpecCloseTS( fits, 0, &status );
+  acsSpecCloseTS( fits, 0, 0, NULL, &status );
   gettimeofday(&tp2, NULL);
   diff = duration( &tp1, &tp2, &status );
   printf("Time to close file = %.3f seconds\n", diff);
@@ -312,7 +312,7 @@ static void writeSpectrum( const float spectrum[], unsigned int nsubsys, JCMTSta
     gettimeofday(&tp1, NULL);
     (*count)++;
     /* printf("Writing spectrum sequence %u end %u\n",record->rts_num, record->rts_endnum); */
-    acsSpecWriteTS(j+1, nchans[j], spectrum2, record, spechdr, status);
+    acsSpecWriteTS(j+1, nchans[j], spectrum2, record, spechdr, NULL, status);
     gettimeofday(&tp2, NULL);
     diff = duration( &tp1, &tp2, status);
     if ( diff > 0.5 ) {
