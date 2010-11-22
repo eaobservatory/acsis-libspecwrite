@@ -2001,7 +2001,7 @@ static void writeRecord( void * basepntr[], unsigned int frame,
   STORE_STATE( smu_y, SMU_Y, double );
   STORE_STATE( smu_z, SMU_Z, double );
   STORE_CHAR( smu_chop_phase, SMU_CHOP_PHASE, JCMT__SZSMU_CHOP_PHASE );
-  STORE_STATE( smu_jig_index, SMU_JIG_INDEX, int );
+  STORE_STATE( smu_jig_index, SMU_JIG_INDEX, short );
 
   STORE_STATE( smu_az_jig_x, SMU_AZ_JIG_X, double );
   STORE_STATE( smu_az_jig_y, SMU_AZ_JIG_Y, double );
@@ -2023,8 +2023,8 @@ static void writeRecord( void * basepntr[], unsigned int frame,
   STORE_STATE( tcs_az_bc1, TCS_AZ_BC1, double );
   STORE_STATE( tcs_az_bc2, TCS_AZ_BC2, double );
   STORE_CHAR( tcs_beam, TCS_BEAM, JCMT__SZTCS_BEAM );
-  STORE_STATE( tcs_index, TCS_INDEX, int );
-  STORE_STATE( tcs_percent_cmp, TCS_PERCENT_CMP, int );
+  STORE_STATE( tcs_index, TCS_INDEX, short );
+  STORE_STATE( tcs_percent_cmp, TCS_PERCENT_CMP, short );
   STORE_CHAR( tcs_source, TCS_SOURCE, JCMT__SZTCS_SOURCE );
   STORE_CHAR( tcs_tr_sys, TCS_TR_SYS, JCMT__SZTCS_TR_SYS );
   STORE_STATE( tcs_tr_ang, TCS_TR_ANG, double );
@@ -2040,7 +2040,7 @@ static void writeRecord( void * basepntr[], unsigned int frame,
   STORE_STATE( tcs_dm_rel, TCS_DM_REL, double );
 
   /* JOS control */
-  STORE_STATE( jos_drcontrol, JOS_DRCONTROL, int );
+  STORE_STATE( jos_drcontrol, JOS_DRCONTROL, unsigned short );
 
   /* ENVIRO task */
   STORE_STATE( enviro_air_temp, ENVIRO_AIR_TEMP, float );
@@ -2052,9 +2052,9 @@ static void writeRecord( void * basepntr[], unsigned int frame,
 
   /* ACSIS internal */
   STORE_CHAR( acs_source_ro, ACS_SOURCE_RO, JCMT__SZACS_SOURCE_RO );
-  STORE_STATE( acs_no_prev_ref, ACS_NO_PREV_REF, int );
-  STORE_STATE( acs_no_next_ref, ACS_NO_NEXT_REF, int );
-  STORE_STATE( acs_no_ons, ACS_NO_ONS, int );
+  STORE_STATE( acs_no_prev_ref, ACS_NO_PREV_REF, short );
+  STORE_STATE( acs_no_next_ref, ACS_NO_NEXT_REF, short );
+  STORE_STATE( acs_no_ons, ACS_NO_ONS, short );
   STORE_STATE( acs_exposure, ACS_EXPOSURE, float );
   STORE_STATE( acs_offexposure, ACS_OFFEXPOSURE, float );
 
