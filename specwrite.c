@@ -2040,7 +2040,7 @@ static void writeRecord( void * basepntr[], unsigned int frame,
   STORE_STATE( tcs_dm_rel, TCS_DM_REL, double );
 
   /* JOS control */
-  STORE_STATE( jos_drcontrol, JOS_DRCONTROL, unsigned short );
+  STORE_STATE( jos_drcontrol, JOS_DRCONTROL, short );
 
   /* ENVIRO task */
   STORE_STATE( enviro_air_temp, ENVIRO_AIR_TEMP, float );
