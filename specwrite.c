@@ -2825,6 +2825,13 @@ static size_t sizeofHDSType( const char * type, int * status ) {
   case 'R':
     retval = 4;
     break;
+  case 'W':
+    retval = 2;
+    break;
+  case 'U':
+    /* Assume the only unsigned type is a UW */
+    retval = 2;
+    break;
   case 'C':
     /* offset past the _CHAR* */
     retval = strtol( &(type[6]) , NULL, 10);
