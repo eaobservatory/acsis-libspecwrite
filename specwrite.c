@@ -234,12 +234,15 @@ static int hasAllSpectraCareful( const obsData * obsinfo, const subSystem * subs
 static int hasSeqSpectra( const obsData * obsinfo, subSystem * subsys,
                           unsigned int tindex, int * status );
 
+static
 void writeFlagFile (const obsData * obsinfo, const subSystem subsystems[],
                     int flagfile_length, char * flagfile_name, int * status);
 
+static
 void writeOneWCSandFITS (const obsData * obsinfo, const subSystem subsys,
 			 AstFitsChan * const fits, int * badfits, char errbuff[], int * status);
 
+static
 void writeAllWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
 			 AstFitsChan * const fits[], int badfits[], char errbuff[], int * status);
 
@@ -3015,6 +3018,7 @@ static int hasAllSpectraCareful( const obsData * obsinfo, const subSystem * subs
 			  
 /* Write the OK flag file and content */
 
+static
 void writeFlagFile (const obsData * obsinfo, const subSystem subsystems[],
                     int flagfile_length, char * flagfile_name, int * status) {
 
@@ -3131,7 +3135,7 @@ void writeFlagFile (const obsData * obsinfo, const subSystem subsystems[],
   return;
 }
 
-
+static
 void writeOneWCSandFITS (const obsData * obsinfo, const subSystem subsys,
 			 AstFitsChan * const fits, int * badfits, 
 			 char errbuff[], int * status) {
@@ -3392,6 +3396,7 @@ void writeOneWCSandFITS (const obsData * obsinfo, const subSystem subsys,
   return;
 }
 
+static
 void writeAllWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
 			 AstFitsChan * const fits[], int badfits[], 
 			 char errbuff[], int * status) {
