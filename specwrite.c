@@ -24,6 +24,7 @@
 /* Starlink includes */
 #include "sae_par.h"
 #include "star/hds.h"
+#include "dat_err.h"
 #include "ndf.h"
 #include "ast.h"
 #include "ems.h"
@@ -247,6 +248,13 @@ void writeAllWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
 			 AstFitsChan * const fits[], int badfits[], char errbuff[], int * status);
 
 static
+void writeSpecWcsAndFITS( int indf, AstFrameSet * wcs, AstFitsChan * fchan, int *status );
+
+static
+AstFrameSet * readWcsFromFITS ( AstFitsChan * infchan, int * badfits,
+                                AstFitsChan ** outfchan, char errbuff[], int *status );
+
+static
 AstFrameSet *specWcs( AstFrameSet *fs, const char veldef[], int ntime, const double times[], int * status );
 
 static double acs_tzoffset( void );
@@ -259,6 +267,7 @@ static double duration ( struct timeval * tp1, struct timeval * tp2 );
 
 /* Stolen code */
 static int acs_kpgPtfts( int indf, AstFitsChan * fchan, int * status );
+static int acs_kpgGtfts( int indf, AstFitsChan ** fchan, int * status );
 
 /* Function to put quotes around a symbol so that we can do
    CPP string concatenation */
@@ -1474,6 +1483,96 @@ acsSpecCloseTS( AstFitsChan * const fits[], int incArchiveBounds, int flagfile_l
 
   printf("Wrote %u spectra in total\n", COUNTER);
  
+}
+
+/*
+ *+
+ *  Name:
+ *     acsRewriteWCS
+
+ *  Purpose:
+ *     Rewrite the Spectral WCS to a data file
+
+ *  Invocation:
+ *     acsRewriteWCS( int indf, int * status );
+
+ *  Language:
+ *     Starlink ANSI C
+
+ *  Description:
+ *     Read the FITS header from a previously opened file (opened in
+ *     UPDATE mode), read the WCS from it and the JCMTSTATE information,
+ *     write out a time series FrameSet and stripped fits header.
+
+ *  Arguments:
+ *     indf = int (Given)
+ *        NDF identifier to file to be updated.
+ *     status = int * (Given & Returned)
+ *        Inherited status.
+
+ *  Authors:
+ *     TIMJ: Tim Jenness (JAC, Hawaii)
+
+ *  History:
+ *     2011-03-30 (TIMJ):
+ *        Original version.
+
+ *  Notes:
+ *     - Stand alone public function
+
+ *  Copyright:
+ *     Copyright (C) 2011 Science & Technology Facilities Council.
+ *     All Rights Reserved.
+
+ *  Licence:
+ *     This program is free software; you can redistribute it and/or
+ *     modify it under the terms of the GNU General Public License as
+ *     published by the Free Software Foundation; either version 2 of
+ *     the License, or (at your option) any later version.
+ *
+ *     This program is distributed in the hope that it will be
+ *     useful, but WITHOUT ANY WARRANTY; without even the implied
+ *     warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
+ *     PURPOSE. See the GNU General Public License for more details.
+ *
+ *     You should have received a copy of the GNU General Public
+ *     License along with this program; if not, write to the Free
+ *     Software Foundation, Inc., 59 Temple Place, Suite 330, Boston,
+ *     MA 02111-1307, USA
+
+ *-
+ */
+
+void acsRewriteWCS( int indf, int * status ) {
+
+  AstFitsChan * fchan = NULL;
+  AstFitsChan * outfchan = NULL;
+  AstFrameSet * wcs = NULL;
+  int badfits = 0;
+  int          place;       /* unused NDF placeholder */
+
+  if (*status != SAI__OK) return;
+  if (indf == NDF__NOID) return;
+
+  /* Read the FITS extension */
+  acs_kpgGtfts( indf, &fchan, status );
+
+  /* Mark headers for retention when stripped */
+  wcs = readWcsFromFITS( fchan, &badfits, &outfchan, NULL, status );
+
+  /* Rewrite the FITS and WCS */
+  writeSpecWcsAndFITS( indf, wcs, outfchan, status );
+
+  /* clean up */
+  if (wcs) wcs = astAnnul( wcs );
+  if (fchan) fchan = astAnnul( fchan );
+  if (outfchan) outfchan = astAnnul( outfchan );
+
+  if (*status != SAI__OK) {
+    ndfMsg( "FILE", indf );
+    errRep("", "Unable to re-write WCS of file ^FILE", status );
+  }
+
 }
 
 /*********************** HELPER FUNCTIONS (PRIVATE) *****************************/
@@ -3147,35 +3246,16 @@ void writeOneWCSandFITS (const obsData * obsinfo, const subSystem subsys,
   AstFitsChan * lfits = NULL; /* Local copy of FITS header */
   int *        oldstat;     /* Internal AST status on entry */
   AstFrameSet *  wcs = NULL; /* World coordinates system from FITS header */
-  HDSLoc * xloc = NULL;    /* Extension locator */
-  size_t tsize;            /* number of sequence steps in file */
-  HDSLoc * tloc = NULL;    /* Locator to time data */
-  double * tdata = NULL;   /* Pointer to mapped MJD time data */
   int      tempscal = 0;   /* temperature scale? */
   void * tpntr = NULL;     /* temporary generic pointer */
-  AstFrameSet * specwcs = NULL; /* framset for timeseries cube */
   char * stemp = NULL;     /* temporary pointer to string */
   int sysstat;             /* status from system call */
   char units[72];          /* Unit string from fits header BUNIT */
 #ifdef SPECWRITE_WRITE_HISTORY
   const char * const history[1] = { "Finalise headers and make ICD compliant." };
 #endif
-  int   parlen = 0;        /* returned length of param */
-  char  param[EMS__SZPAR+1]; /* temp buffer for EMS param name */
-  int   oplen  = 0;       /* returned length of errbuff */
-  char veldef[72];        /* velocity definition in use */
   const char *skysys;         /* Sky system */
   char receppos_sys[16];  /* Coordinate frame for RECEPPOS */
-
-  /* headers to be retained */
-  const char * retainfits[] = {
-    "DATE-OBS", "OBSGEO-X", "OBSGEO-Y", "OBSGEO-Z", "SSYSOBS", "DUT1", NULL
-  };
-
-  /* headers to be deleted after WCS is extracted */
-  const char * delfits[] = {
-    "MJD-AVG", "END", NULL
-  };
 
   if (*status != SAI__OK) return;
 
@@ -3188,48 +3268,8 @@ void writeOneWCSandFITS (const obsData * obsinfo, const subSystem subsys,
   /* Start an AST context so we do not need to annul AST pointers explicitly. */
   astBegin;
 
-  /* Extract astrometry from a local copy (so we do not damage the fitschan
-     provided to use - this can be done outside the subscan loop */
-  lfits = astCopy( fits );
-
-  /* extract astrometry from the FITS header. We do this first so that we can
-     decide whether we are writing a FITS header with extracted astrometry
-     or whether we are using the supplied header (for debugging purposes).
-     - in the event of failure we should flag the occurence but soldier
-     on since we need to write the data even if the FITS headers are dodgy
-     and write the original FITS header to the file.
-     The caller can then trigger the error state.
-  */
-  *badfits = 0;  /* assume ok */
-  astClear( lfits, "Card" );
-  wcs = NULL;
-  if (*status == SAI__OK) {
-    /* Mark some headers to be retained after stripping */
-    j = 0;
-    while ( retainfits[j] != NULL ) {
-      /* clearing each time is not very efficient but I don't want
-	 to burn in the ordering */
-      astClear( lfits, "Card" );
-      if (astFindFits( lfits, retainfits[j], NULL, 0 ) ) {
-	astRetainFits( lfits );
-      }
-      j++;
-    }
-
-    /* Rewind before parsing */
-    astClear(lfits,"Card");
-    wcs = astRead( lfits );
-    if (*status != SAI__OK) {
-      /* copy the second (! - since we do not want the linenumber)
-	 AST message from stack into buffer */
-      emsEload( param, &parlen, errbuff, &oplen, status );
-      emsEload( param, &parlen, errbuff, &oplen, status );
-      emsAnnul( status );
-      /* get new copy to write full unmodified header */
-      lfits = astCopy( fits );
-      *badfits = 1;
-    }
-  }
+  /* Extract the WCS from the file */
+  wcs = readWcsFromFITS( fits, badfits, &lfits, errbuff, status );
 
   /* work out the data units from BUNIT */
   astClear( lfits, "Card");
@@ -3251,18 +3291,6 @@ void writeOneWCSandFITS (const obsData * obsinfo, const subSystem subsys,
   } else {
     /* not calibrated */
     strcpy( units, "uncalibrated" );
-  }
-
-  /* Remove cards that should not end up in the output header */
-  j = 0;
-  while ( delfits[j] != NULL ) {
-    /* clearing each time is not very efficient but I don't want
-       to burn in the ordering */
-    astClear( lfits, "Card" );
-    if (astFindFits( lfits, delfits[j], NULL, 0 ) ) {
-      astDelFits( lfits );
-    }
-    j++;
   }
 
   /* Determine whether we had an AZEL or non-AZEL (TRACKING) cube. This is important for the
@@ -3315,40 +3343,8 @@ void writeOneWCSandFITS (const obsData * obsinfo, const subSystem subsys,
 
     /* Bounds associated with this file */
 
-
-    /* Build up the frameset from the FITS header and the time series */
-
-    /* need the time information */
-    ndfXloc( indf, STATEEXT, "READ", &xloc, status );
-    datFind( xloc, "TCS_TAI", &tloc, status );
-      
-    datMapV( tloc, "_DOUBLE", "READ", &tpntr, &tsize, status );
-    tdata = tpntr;
-
-    /* when we get the spectral WCS we would like to make sure that it defaults to a velocity
-       frame rather than frequency frame. We therefore need the DOPPLER fits header (bad name) */
-    astClear( lfits, "Card");
-    veldef[0] = '\0';
-    if ( astGetFitsS( lfits, "DOPPLER", &stemp ) ) {
-      strcpy( veldef, stemp );
-    }
-
-    /* calculate the frameset */
-    specwcs = specWcs( wcs, veldef, (int)tsize, tdata, status);
-
-    /* clean up */
-    datUnmap( tloc, status );
-    datAnnul( &tloc, status );
-    datAnnul( &xloc, status );
-
-    /* Write WCS */
-    ndfPtwcs( specwcs, indf, status );
-
-    /* free the new WCS object */
-    specwcs = astAnnul( specwcs );
-
-    /* write FITS header */
-    acs_kpgPtfts( indf, lfits, status );
+    /* Build up the frameset from the FITS header and the time series and write it */
+    writeSpecWcsAndFITS( indf, wcs, lfits, status );
 
     /* easiest to write a second piece of history information for header collation.
        Stops having to worry about only getting a single HISTORY entry when NDF
@@ -3420,6 +3416,106 @@ void writeAllWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
 
   return;
 }
+
+/* Preprocess a FITS chan and read the WCS
+  1) Marking FITS headers to be retained
+  2) Extracting a WCS
+  3) Deleting leftover headers that are no longer required
+  4) If extraction fails return a copy of the original
+  else return a modified fitschan.
+
+  If errbuff is present the error from a bad fits read
+  is stored and the error is annulled. If errbuff is null
+  the error from a bad read is not annulled.
+
+ */
+
+static
+AstFrameSet * readWcsFromFITS ( AstFitsChan * infchan, int * badfits,
+                                AstFitsChan ** outfchan, char errbuff[],
+                                int *status ) {
+
+  AstFitsChan * lfits = NULL;
+  unsigned int j;           /* Loop counter */
+  AstFrameSet * wcs = NULL;
+  int   parlen = 0;        /* returned length of param */
+  char  param[EMS__SZPAR+1]; /* temp buffer for EMS param name */
+  int   oplen  = 0;       /* returned length of errbuff */
+
+  /* headers to be retained */
+  const char * retainfits[] = {
+    "DATE-OBS", "OBSGEO-X", "OBSGEO-Y", "OBSGEO-Z", "SSYSOBS", "DUT1", NULL
+  };
+
+  /* headers to be deleted after WCS is extracted */
+  const char * delfits[] = {
+    "MJD-AVG", "END", NULL
+  };
+
+  if (*status != SAI__OK) return wcs;
+
+  /* Extract astrometry from a local copy (so we do not damage the fitschan
+     provided to use - this can be done outside the subscan loop */
+  lfits = astCopy( infchan );
+
+  /* extract astrometry from the FITS header. We do this first so that we can
+     decide whether we are writing a FITS header with extracted astrometry
+     or whether we are using the supplied header (for debugging purposes).
+     - in the event of failure we should flag the occurence but soldier
+     on since we need to write the data even if the FITS headers are dodgy
+     and write the original FITS header to the file.
+     The caller can then trigger the error state.
+  */
+  *badfits = 0;  /* assume ok */
+  astClear( lfits, "Card" );
+  wcs = NULL;
+  if (*status == SAI__OK) {
+    /* Mark some headers to be retained after stripping */
+    j = 0;
+    while ( retainfits[j] != NULL ) {
+      /* clearing each time is not very efficient but I don't want
+	 to burn in the ordering */
+      astClear( lfits, "Card" );
+      if (astFindFits( lfits, retainfits[j], NULL, 0 ) ) {
+	astRetainFits( lfits );
+      }
+      j++;
+    }
+
+    /* Rewind before parsing */
+    astClear(lfits,"Card");
+    wcs = astRead( lfits );
+    if (*status != SAI__OK) {
+      /* copy the second (! - since we do not want the linenumber)
+	 AST message from stack into buffer */
+      if (errbuff) {
+        emsEload( param, &parlen, errbuff, &oplen, status );
+        emsEload( param, &parlen, errbuff, &oplen, status );
+        emsAnnul( status );
+        /* get new copy to write full unmodified header */
+        lfits = astCopy( infchan );
+      }
+      *badfits = 1;
+    }
+  }
+
+  /* Remove cards that should not end up in the output header */
+  j = 0;
+  while ( delfits[j] != NULL ) {
+    /* clearing each time is not very efficient but I don't want
+       to burn in the ordering */
+    astClear( lfits, "Card" );
+    if (astFindFits( lfits, delfits[j], NULL, 0 ) ) {
+      astDelFits( lfits );
+    }
+    j++;
+  }
+
+  *outfchan = lfits;
+  return wcs;
+
+}
+
 
 /********************************** Debug functions ********************/
 
@@ -3705,6 +3801,57 @@ AstFrameSet *specWcs( AstFrameSet * fs, const char veldef[], int ntime, const do
 
 }
 
+/* Note that this assumes astRetainFits has been run earlier */
+
+static
+void writeSpecWcsAndFITS( int indf, AstFrameSet * wcs, AstFitsChan * fchan, int *status ) {
+
+  char veldef[72];        /* velocity definition in use */
+  char * stemp = NULL;     /* temporary pointer to string */
+
+  HDSLoc * tloc = NULL;    /* Locator to time data */
+  double * tdata = NULL;   /* Pointer to mapped MJD time data */
+  HDSLoc * xloc = NULL;    /* Extension locator */
+  void * tpntr = NULL;     /* temporary generic pointer */
+  size_t tsize;            /* number of sequence steps in file */
+  AstFrameSet * specwcs = NULL;
+
+  if (*status != SAI__OK) return;
+
+  /* need the time information */
+  ndfXloc( indf, STATEEXT, "READ", &xloc, status );
+  datFind( xloc, "TCS_TAI", &tloc, status );
+  datMapV( tloc, "_DOUBLE", "READ", &tpntr, &tsize, status );
+  tdata = tpntr;
+
+  /* when we get the spectral WCS we would like to make sure that it defaults to a velocity
+     frame rather than frequency frame. We therefore need the DOPPLER fits header (bad name) */
+  astClear( fchan, "Card");
+  veldef[0] = '\0';
+  if ( astGetFitsS( fchan, "DOPPLER", &stemp ) ) {
+    strcpy( veldef, stemp );
+  }
+
+  /* calculate the frameset */
+  specwcs = specWcs( wcs, veldef, (int)tsize, tdata, status);
+
+  /* clean up */
+  datUnmap( tloc, status );
+  datAnnul( &tloc, status );
+  datAnnul( &xloc, status );
+
+  /* Write WCS */
+  ndfPtwcs( specwcs, indf, status );
+
+  /* free the new WCS object */
+  specwcs = astAnnul( specwcs );
+
+  /* write FITS header */
+  acs_kpgPtfts( indf, fchan, status );
+
+  return;
+}
+
 /* inherited status is set to bad if the named file already exists */
 
 static void checkNoFileExists( const char * file, int * status ) {
@@ -3939,6 +4086,216 @@ static int acs_kpgPtfts( int indf, AstFitsChan * fchan, int * status ) {
 
   return *status;
 }
+
+/* Oh the humanity - still not wanting a KAPLIBS dependency */
+
+
+/*
+*+
+*  Name:
+*     kpgGtfts
+
+*  Purpose:
+*     Obtains FITS header information from an NDF.
+
+*  Language:
+*     Starlink ANSI C
+
+*  Invocation:
+*     kpgGtfts( int indf, AstFitsChan ** fchan, int * status );
+
+*  Description:
+*     The routine reads the FITS extension from an NDF and returns an
+*     AST pointer to a FitsChan which contains this information. The
+*     information may then be accessed using routines from the AST
+*     library (SUN/211).
+
+*  Arguments:
+*     indf = int (Given)
+*        NDF identifier.
+*     fchan = AstFitsChan ** (Returned)
+*        An AST pointer to a FitsChan which contains information about
+*        the FITS headers associated with the NDF.
+*     status = int * (Given and Returned)
+*        The global status.
+
+*  Return Value:
+*     Returns the status.
+
+*  Notes:
+*     - It is the caller's responsibility to annul the AST pointer
+*     issued by this routine (e.g. by calling AST_ANNUL) when it is no
+*     longer required.
+*     - If this routine is called with STATUS set, then a value of
+*     AST__NULL will be returned for the FCHAN argument, although no
+*     further processing will occur. The same value will also be
+*     returned if the routine should fail for any reason.
+*     - Status is set to KPG__NOFTS if no FITS extension is found.
+
+*  Copyright:
+*     Copyright (C) 2005 Particle Physics and Astronomy Research Council.
+*     All Rights Reserved.
+
+*  Licence:
+*     This program is free software; you can redistribute it and/or
+*     modify it under the terms of the GNU General Public License as
+*     published by the Free Software Foundation; either version 2 of
+*     the License, or (at your option) any later version.
+*
+*     This program is distributed in the hope that it will be
+*     useful,but WITHOUT ANY WARRANTY; without even the implied
+*     warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
+*     PURPOSE. See the GNU General Public License for more details.
+*
+*     You should have received a copy of the GNU General Public License
+*     along with this program; if not, write to the Free Software
+*     Foundation, Inc., 59 Temple Place,Suite 330, Boston, MA
+*     02111-1307, USA
+
+*  Authors:
+*     TIMJ: Tim Jenness (JAC, Hawaii)
+*     {enter_new_authors_here}
+
+*  History:
+*     25-NOV-2005 (TIMJ):
+*        Original version.
+*     29-NOV-2005 (TIMJ):
+*        Rename from ndfGtfts
+*     {enter_changes_here}
+
+*  Bugs:
+*     {note_any_bugs_here}
+
+*-
+*/
+
+int acs_kpgGtfts( int indf, AstFitsChan ** fchan, int * status ) {
+
+  char   *card;               /* Pointer to start of current card */
+  HDSLoc *fitsloc = NULL;     /* FITS HDS Locator in extension */
+  hdsdim fitsdim[DAT__MXDIM]; /* Dimensionality of FITS extension */
+  void   *fpntr = NULL;       /* Pointer to the mapped FITS header */
+  unsigned int    i;          /* Loop counter */
+  size_t ncards;              /* Number of header cards in extension */
+  size_t nchars;              /* Number of characters in extension */
+  int    ndim;                /* Number of dimensions in FITS array */
+  int    *oldstat;            /* Current status watched by AST */
+  int    there = 0;           /* Is FITS extension there? */
+  char   type[DAT__SZTYP+1];  /* Data type of the FITS extension */
+
+  /* make sure the fits chan is set to NULL on exit with bad status */
+  *fchan = AST__NULL;
+
+  if ( *status != SAI__OK ) return *status;
+
+  /* First need to look for a FITS extension */
+  ndfXstat( indf, "FITS", &there, status );
+
+  if ( *status == SAI__OK ) {
+    if (!there) {
+      *status = SAI__ERROR;
+      errRep( "KPG_GTFTS_NOF", "FITS extension is not present in NDF",
+	      status );
+    }
+  }
+
+  /* Get the locator to the FITS extension */
+  ndfXloc( indf, "FITS", "READ", &fitsloc, status );
+
+  /* Get the data type */
+  datType( fitsloc, type, status );
+
+  if ( *status == SAI__OK ) {
+    if (strcmp(type, "_CHAR*" FITSSTR) != 0 ) {
+      *status = DAT__TYPIN;
+      msgSetc( "TYP", type );
+      errRep( "KPG_GTFTS_TYP", "Data type of FITS extension is '^TYP' not '_CHAR*" FITSSTR "'", status );
+    }
+  }
+
+  /* Determine the dimensionality of the FITS extension */
+  datShape( fitsloc, DAT__MXDIM, fitsdim, &ndim, status );
+
+  if ( *status == SAI__OK ) {
+    if ( ndim != 1 ) {
+      *status = DAT__DIMIN;
+      msgSeti( "NDIM", ndim );
+      errRep( "KPG_GTFTS_DIM", "Number of dimensions in FITS extension = ^NDIM but should be 1", status );
+    }
+  }
+
+  /* Get number of FITS entries - should match fitsdim[0] */
+  datSize( fitsloc, &ncards, status );
+
+  if ( *status == SAI__OK ) {
+    if ( ncards != (size_t)fitsdim[0] ) {
+      *status = DAT__DIMIN;
+      msgSeti( "DM", (int)fitsdim[0] );
+      msgSeti( "SZ", (int)ncards );
+      errRep( "KPG_GTFTS_SIZ","Bizarre error whereby the first dimension of the FITS extension (^DM) does not equal the size of the extension (^SZ)", status);
+    }
+  }
+
+  /* Use datMapV to map the entire FITS array, then step through
+     it 80 characters at a time until we have done all the cards.
+     Note that there is no nul-terminator so we can not use
+     astPutCards directly */
+
+  datMapV( fitsloc, "_CHAR*" FITSSTR, "READ", &fpntr, &nchars, status );
+
+  if ( *status == SAI__OK ) {
+    if ( ncards != nchars ) {
+      *status = DAT__DIMIN;
+      msgSeti( "DM", (int)nchars);
+      msgSeti( "SZ", (int)ncards );
+      errRep( "KPG_GTFTS_SIZ2","Bizarre error whereby the number of elements mapped in the FITS extension (^DM) does not equal the size of the extension (^SZ)", status);
+    }
+  }
+
+  /* Do not bother with AST stuff if status is bad */
+  if ( *status == SAI__OK ) {
+
+    /* Associate AST status with our status */
+    oldstat = astWatch( status );
+
+    /* Create a new FitsChan */
+    *fchan = astFitsChan( NULL, NULL, "" );
+
+    /* store pointer to start of string in new variable for iteration */
+    card = fpntr;
+
+    /* Extract headers 80 characters at a time. No nul-termination
+       but astPutFits guarantees to only read 80 characters */
+    for (i = 0; i < ncards; i++ ) {
+      astPutFits( *fchan, card, 0 );
+      card += SZFITSCARD;
+    }
+
+    /* Rewind the FitsChan */
+    astClear( *fchan, "Card" );
+
+    /* if status is bad annul the Fits Chan */
+    if ( *status != SAI__OK ) astAnnul( *fchan );
+
+    /* Reset AST status */
+    astWatch( oldstat );
+
+  }
+
+  /* Clean up */
+  datUnmap( fitsloc, status );
+  datAnnul( &fitsloc, status );
+
+  /* Report wrapper error message */
+  if ( *status != SAI__OK ) {
+    errRep( "KPG_GTFTS_ERR",
+	    "KPG_GTFTS: Error obtaining FITS header from an NDF.",
+	    status );
+  }
+
+  return *status;
+}
+
 
 /* Routine to calculate the time zone offset in hours. */
 static double acs_tzoffset( void ) {

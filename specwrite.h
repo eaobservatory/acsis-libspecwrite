@@ -131,5 +131,8 @@ void acsSpecSetBackend ( backend_type type,
 void acsSpecSetMem ( const int nBytes, 
                      int *status );
 
+/* Allow the spectral WCS to be re-extracted */
+void acsRewriteWCS( int indf, int * status );
+
 /* INCLUDE_HDS_SPEC_H */
 #endif
