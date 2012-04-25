@@ -2902,7 +2902,7 @@ static void myRealloc( void ** pntr, size_t nbytes, int * status ) {
   if (tmpp == NULL) {
     *status = SAI__ERROR;
     emsSyser( "MSG", errno );
-    emsSeti64( "NB", (int64_t)nbytes );
+    emsSetk( "NB", (int64_t)nbytes );
     emsRep( " ", "Unable to allocate ^NB bytes - ^MSG", status );
     starFree( *pntr );
     *pntr = NULL;
