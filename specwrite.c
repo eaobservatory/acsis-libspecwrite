@@ -55,6 +55,11 @@
 # define SPECWRITE_WRITE_HISTORY
 #endif
 
+/* Use MERS for printing information message */
+#ifdef PACKAGE_UPCASE
+# define USE_MERS
+#endif
+
 /* Debug prints
    0 - disabled
    1 - standard debug 
@@ -848,7 +853,11 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
         != 0) &&
        (strncmp( record->acs_source_ro, "SOURCE", JCMT__SZACS_SOURCE_RO )
         != 0) ) {
+#ifdef USE_MERS
+    msgOutf("", "Can not accept source of '%s'", status, record->acs_source_ro );
+#else
     printf("Can not accept source of '%s'\n", record->acs_source_ro );
+#endif
     return -1;
   }
 
@@ -1481,8 +1490,11 @@ acsSpecCloseTS( AstFitsChan * const fits[], int incArchiveBounds, int flagfile_l
     *status = lstat;
   }
 
+#ifdef USE_MERS
+  msgOutf( "", "Wrote %u spectra in total", status, COUNTER );
+#else
   printf("Wrote %u spectra in total\n", COUNTER);
- 
+#endif
 }
 
 /*
