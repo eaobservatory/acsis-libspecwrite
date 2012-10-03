@@ -1491,9 +1491,11 @@ acsSpecCloseTS( AstFitsChan * const fits[], int incArchiveBounds, int flagfile_l
   }
 
 #ifdef USE_MERS
-  msgOutf( "", "Wrote %u spectra in total", status, COUNTER );
+  msgOutf( "", "Wrote %u %s in total", status, COUNTER,
+           (COUNTER == 1 ? "spectrum" : "spectra") );
 #else
-  printf("Wrote %u spectra in total\n", COUNTER);
+  printf("Wrote %u %s in total\n", COUNTER,
+         (COUNTER == 1 ? "spectrum" : "spectra") );
 #endif
 }
 
