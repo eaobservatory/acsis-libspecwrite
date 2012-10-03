@@ -62,7 +62,7 @@
 
 /* Debug prints
    0 - disabled
-   1 - standard debug 
+   1 - standard debug
    2 - verbose debug
 */
 #define SPW_DEBUG_LEVEL 0
@@ -70,9 +70,9 @@
 /* Largest file name allowed (including path) */
 #define MAXFILE 1024
 
-/* Maximum number of subsystems we can handle 
+/* Maximum number of subsystems we can handle
    We know that ACSIS can have at most 4 spectral subsystems
-   and they will not change during a single observation. 
+   and they will not change during a single observation.
    CHANGED to 16 to support DAS observations. */
 
 #define MAXSUBSYS 16
@@ -127,7 +127,7 @@ typedef struct fileInfo {
   HDSLoc * extloc;  /* JCMSTATE extension locator */
   HDSLoc * acsisloc; /* ACSIS extension locator */
   HDSLoc * extlocators[JCMT_COMP_NUM]; /* Locators to each JCMTSTATE component */
-  HDSLoc * receppos_loc;   /* Locators to each .MORE.ACSIS.RECEPPOS */  
+  HDSLoc * receppos_loc;   /* Locators to each .MORE.ACSIS.RECEPPOS */
   HDSLoc * tsys_loc;       /* Locator to .MORE.ACSIS.TSYS */
   HDSLoc * trx_loc;        /* Locator to .MORE.ACSIS.TRX */
   int extmapped;  /* JCMTSTATE extension is mapped */
@@ -148,7 +148,7 @@ typedef struct subSystem {
   int          inseq;   /* We are in a sequence */
   unsigned int seqlen;  /* Expected length of this sequence */
   int          alloced; /* called allocResources no this struct? */
-  specData     tdata;   /* Actual data */        
+  specData     tdata;   /* Actual data */
   fileInfo     file;    /* File data (can be none if file.infd == NDF__NOID) */
 } subSystem;
 
@@ -167,7 +167,7 @@ static char * getFileName( const char * dir, unsigned int yyyymmdd, unsigned int
                            unsigned int obsnum, unsigned int subscan, int * status );
 static char * getOkFileName( const char * dir, unsigned int yyyymmdd,
                              unsigned int obsnum, int * status );
-static char * getDirName( const char * dir, unsigned int yyyymmdd, 
+static char * getDirName( const char * dir, unsigned int yyyymmdd,
                           unsigned int obsnum, int * status );
 static char * getFileRoot( unsigned int yyyymmdd, unsigned int subsys,
                            unsigned int obsnum, unsigned int subscan, int * status );
@@ -188,9 +188,9 @@ createExtensions( subSystem * subsys, unsigned int size, int * status );
 static void
 createACSISExtensions( const obsData * obsinfo, subSystem * subsys, unsigned int size, int * status );
 
-static void resizeExtensions( subSystem * subsys, unsigned int newsize, int remap, 
+static void resizeExtensions( subSystem * subsys, unsigned int newsize, int remap,
                               int * status );
-static void resizeACSISExtensions( subSystem * subsys, unsigned int newsize, int remap, 
+static void resizeACSISExtensions( subSystem * subsys, unsigned int newsize, int remap,
                                    int * status );
 static void closeExtensions( subSystem * subsys, int * status );
 static void closeACSISExtensions( subSystem * subsys, int * status );
@@ -208,7 +208,7 @@ static void writeRecepPos( const obsData * obsinfo, double * posdata, unsigned i
                            const ACSISSpecHdr * record, int * status );
 static void writeTSysTRx( const obsData * obsinfo, float * tsysdata, float * trxdata,
                           unsigned int frame, const ACSISSpecHdr * record, int * status );
-static unsigned int calcOffset( unsigned int nchans, unsigned int maxreceps, unsigned int nrecep, 
+static unsigned int calcOffset( unsigned int nchans, unsigned int maxreceps, unsigned int nrecep,
                                 unsigned int tindex, int *status );
 
 static void allocHeaders( subSystem *subsys, unsigned int size, int * status );
@@ -221,7 +221,7 @@ allocResources( const obsData * obsinfo, subSystem *subsys, unsigned int nseq,
 
 static void freeResources ( obsData * obsinfo, subSystem * subsys, int * status);
 static void allocPosData( const obsData *obsinfo, subSystem *subsys, unsigned int nseq, int * status );
-static void allocTsysTrxData( const obsData * obsinfo, subSystem * subsys, unsigned int nseq, 
+static void allocTsysTrxData( const obsData * obsinfo, subSystem * subsys, unsigned int nseq,
                               int * status );
 static void
 flushResources( const obsData * obsinfo, subSystem * subsys, int * status );
@@ -351,9 +351,9 @@ static double maxbytes = 512*1024*1024;
 
 /* if we have unfeasibly small spectra and 1 receptor we could get
    a very large requirement for memory for all the extensions
-   associated with MAXBYTES above. Therefore limit the number of 
+   associated with MAXBYTES above. Therefore limit the number of
    sequence steps we can actual get.
-   Peak rate is 10 MB/s which would be maxseq of 
+   Peak rate is 10 MB/s which would be maxseq of
    MAXBYTES / (4 * 8192 * MAXRECEP) = 1024 sequences
    whereas min rate gives
    MAXBYTES / (4 *    1 * 1       ) = 134 million sequences
@@ -427,7 +427,7 @@ acsSpecWriterVersion() {
  *     Prepare the file writing system for a new observation
 
  *  Invocation:
- *     acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, 
+ *     acsSpecOpenTS( const char * dir, unsigned int yyyymmdd,
  *                    unsigned int obsnum, unsigned int nrecep,
  *                    unsigned int nsubsys, const char *recepnames[],
  *                    const char * focal_station,
@@ -522,7 +522,7 @@ acsSpecWriterVersion() {
 
 void
 acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
-               unsigned int nrecep, unsigned int nsubsys, 
+               unsigned int nrecep, unsigned int nsubsys,
                char * const recepnames[],
                const char * focal_station,
                const float fplanex[], const float fplaney[], const char *ocsconfig,
@@ -683,8 +683,8 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
  *     Write a spectrum to an HDS time-series file.
 
  *  Invocation:
- *     result = acsSpecWriteTS( unsigned int subsys, unsigned int nchans, 
- *                     const float spectrum[], const JCMTState * record, 
+ *     result = acsSpecWriteTS( unsigned int subsys, unsigned int nchans,
+ *                     const float spectrum[], const JCMTState * record,
  *                     const ACSISSpecHdr * spechdr, AstFitsChan * const fits,
  *                     int * status);
 
@@ -766,7 +766,7 @@ acsSpecOpenTS( const char * dir, unsigned int yyyymmdd, unsigned int obsnum,
  */
 
 int
-acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectrum[], 
+acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectrum[],
                 const JCMTState * record, const ACSISSpecHdr * spechdr,
                 AstFitsChan * const fits, int * status ) {
 
@@ -968,7 +968,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
     printf("First spectrum for this file for this subsystem\n");
 #endif
   } else {
-    /* if the supplied value is the most recent value then we do not 
+    /* if the supplied value is the most recent value then we do not
        need to search. Note that curseq does not actually refer to curpos
        so this optimization is not that helpful since we have to check
        in RTS_NUM array anyway.
@@ -980,13 +980,13 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
         (state.rts_num == rtsseqs[subsys->curpos-1])) {
       /* may as well do the actual for search and stop immediately */
       tindex = subsys->curpos - 1;
-#if SPW_DEBUG_LEVEL > 1      
+#if SPW_DEBUG_LEVEL > 1
       printf("Reusing sequence %u at index %u\n", subsys->curseq, tindex);
 #endif
     } else {
 
       /* search back through the list up to the firstFreeSlot position (we know that
-         before that point all spectra for all sequences have arrived). Be careful to 
+         before that point all spectra for all sequences have arrived). Be careful to
          use i++ since the obvious test and decrementing to firstFreeSlot fails when
          the index goes negative and is treated as a positive number. */
       max_behind = subsys->curpos - subsys->tdata.firstFreeSlot;
@@ -1023,7 +1023,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
       } else {
         /* found it earlier in the file */
 #if SPW_DEBUG_LEVEL > 1
-        printf("Sequence %u matches index %d. Previous seq num=%u\n", 
+        printf("Sequence %u matches index %d. Previous seq num=%u\n",
                state.rts_num, (int)tindex, subsys->curseq);
 #endif
         subsys->curseq = state.rts_num;
@@ -1031,7 +1031,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
       }
     }
   }
-  
+
   /* if the sequence number has incremented we need to increase the t-axis counter */
 
   if (seqinc) {
@@ -1068,7 +1068,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
     }
 
 
-    /* if the required number exceeds the maximum allowed size then 
+    /* if the required number exceeds the maximum allowed size then
        we need to reduce the reqnum to a more manageable level and
        hope that we can flush in the middle of a sequence. We could simply
        set it to one more than the current size (we just need to prevent
@@ -1139,7 +1139,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
       } else {
 #if SPW_DEBUG_LEVEL > 0
         printf("Cursize: %u Curpos: %u ngrow: %u maxsize: %u ; Need to resize.\n",
-               subsys->cursize, subsys->curpos, ngrow, subsys->maxsize); 
+               subsys->cursize, subsys->curpos, ngrow, subsys->maxsize);
 #endif
         /* Resize the NDF */
         resizeResources( &OBSINFO, subsys, ngrow, status );
@@ -1220,7 +1220,7 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
       memcpy( &(data[offset]), spectrum, subsys->nchans*SIZEOF_FLOAT );
 
     /* Store record data and receptor positions. Base record only updates each
-       sequence step but receptor positions and tsys/trx should be written 
+       sequence step but receptor positions and tsys/trx should be written
        for all records. */
     if (seqinc) writeRecord( recdata, tindex, &state, status );
     writeRecepPos( &OBSINFO, posdata, tindex, &acshdr, status );
@@ -1473,14 +1473,14 @@ acsSpecCloseTS( AstFitsChan * const fits[], int incArchiveBounds, int flagfile_l
 
   /* reset progress */
   INPROGRESS = 0;
-  
+
   /* handle a local bad status */
   if (lstat != SAI__OK) {
     /* report some helper message */
     emsRep( " ", "Error closing Spectrum file", &lstat );
   }
 
-  /* release the mark if status on entry was bad so that 
+  /* release the mark if status on entry was bad so that
      we do not contaminate the error stack. */
   if (*status != SAI__OK) {
     if (lstat != SAI__OK) emsAnnul( &lstat );
@@ -1675,7 +1675,7 @@ static char * getFileRoot( unsigned int yyyymmdd, unsigned int subsys,
   if ( backendFlag == ACS__BACKEND_ACSIS ) btype = 'a';
   else if ( backendFlag == ACS__BACKEND_DAS ) btype = 'h';
   else btype = 'a';
- 
+
   /* Form the file name - assume posix filesystem */
   if (*status == SAI__OK) {
     if (subscan > 0) {
@@ -1883,7 +1883,7 @@ openNDF( const obsData * obsinfo, const subSystem * template, subSystem * file,
     size_t inlen;
     hdsdim dims[1];
     char * tempstr; /* padded storage */
-    
+
     /* Work out the number of lines and round it up to make sure there is enough space. */
     inlen = strlen(obsinfo->ocsconfig);
     if (inlen > nchars) {
@@ -1924,7 +1924,7 @@ openNDF( const obsData * obsinfo, const subSystem * template, subSystem * file,
   return;
 }
 
-/* 
+/*
    Create the extensions of specified size.
    Pointers stored in extdata.
    HDS Locators stored in extlocators.
@@ -1949,7 +1949,7 @@ createExtensions( subSystem * subsys, unsigned int size, int * status ) {
   dim[0] = size;
 
   /* Create the extension */
-  ndfXnew( subsys->file.indf, JCMT__EXTNAME, JCMT__EXTTYPE, 0, NULL, &(subsys->file.extloc), status ); 
+  ndfXnew( subsys->file.indf, JCMT__EXTNAME, JCMT__EXTTYPE, 0, NULL, &(subsys->file.extloc), status );
 
   /* Loop and create. Can initialise HDS locator array safely */
   for (j=0; j < JCMT_COMP_NUM; j++ ) {
@@ -1991,11 +1991,11 @@ createExtensions( subSystem * subsys, unsigned int size, int * status ) {
 /*
   Resize the extensions to the supplied value.
   If remap is false, the arrays will not be remapped (so call at end to resize
-  before annulling locators 
+  before annulling locators
 */
 
 static void
-resizeExtensions( subSystem * subsys, unsigned int newsize, 
+resizeExtensions( subSystem * subsys, unsigned int newsize,
                   int remap, int * status ) {
 
   int pos;
@@ -2205,7 +2205,7 @@ createACSISExtensions( const obsData * obsinfo, subSystem * subsys, unsigned int
   /* Need to create the following components:
      - RECEPTORS  _CHAR* array for each of the nrecep elements and their names. This fixed
      once written.
-     - RECEPPOS   _DOUBLE (2 * nrecep * size)   x and y positions 
+     - RECEPPOS   _DOUBLE (2 * nrecep * size)   x and y positions
      (in tracking coordinates) for each
      receptor. This array grows in the same way as JCMTSTATE.
      - TSYS       _REAL (nrecep * size) Grows as JCMTSTATE grows.
@@ -2284,7 +2284,7 @@ createACSISExtensions( const obsData * obsinfo, subSystem * subsys, unsigned int
   } else {
     subsys->file.acsismapped = 1;
   }
-  
+
   if (*status != SAI__OK)
     emsRep(" ", "Error creating ACSIS extension", status );
 
@@ -2294,11 +2294,11 @@ createACSISExtensions( const obsData * obsinfo, subSystem * subsys, unsigned int
 /*
   Resize the ACSIS RECEPPOS and TSYS/TRX extensions to the supplied value.
   If remap is false, the arrays will not be remapped (so call at end to resize
-  before annulling locators) 
+  before annulling locators)
 */
 
 static void
-resizeACSISExtensions( subSystem * subsys, unsigned int newsize, 
+resizeACSISExtensions( subSystem * subsys, unsigned int newsize,
                        int remap, int * status ) {
 
   unsigned int old_rpos_size;
@@ -2491,7 +2491,7 @@ static void closeACSISExtensions( subSystem * subsys, int * status ) {
 }
 
 /* Write coordinate positions to ACSIS extension */
-static void writeRecepPos( const obsData * obsinfo, double * posdata, unsigned int frame, 
+static void writeRecepPos( const obsData * obsinfo, double * posdata, unsigned int frame,
                            const ACSISSpecHdr * spechdr, int * status ) {
   unsigned int offset;
 
@@ -2513,7 +2513,7 @@ static void writeRecepPos( const obsData * obsinfo, double * posdata, unsigned i
 
 /* Write Tsys and Trx to ACSIS extension */
 static void writeTSysTRx( const obsData * obsinfo, float * tsys_data,
-                          float * trx_data, unsigned int frame, 
+                          float * trx_data, unsigned int frame,
                           const ACSISSpecHdr * spechdr, int * status ) {
   unsigned int offset;
 
@@ -2611,7 +2611,7 @@ calcOffset( unsigned int nchans, unsigned int maxreceps, unsigned int nrecep, un
 
   if (*status != SAI__OK) return 0;
 
-  return (nchans * ( maxreceps * tindex + nrecep )); 
+  return (nchans * ( maxreceps * tindex + nrecep ));
 
 }
 
@@ -2655,7 +2655,7 @@ allocResources( const obsData * obsinfo, subSystem * subsys, unsigned int nseq, 
   /* Record the new size */
   subsys->cursize = seq;
 
-  /* initialise all the spectra to bad in case we miss a receptor 
+  /* initialise all the spectra to bad in case we miss a receptor
      in the sequence */
 
   pos = subsys->tdata.spectra;
@@ -2825,7 +2825,7 @@ static void freeResources ( obsData * obsinfo, subSystem * subsys, int * status)
 
 }
 
-/* 
+/*
    Create space for the header information of specified size.
 */
 
@@ -2850,7 +2850,7 @@ allocHeaders( subSystem * subsys, unsigned int size, int * status ) {
     int pos;
     if (*status != SAI__OK) break;
     pos = hdsRecords[j].position;
-    
+
     /* see if component is required for this instrument or not */
     if ( hdsRecords[j].instrument & INST__ACSIS ) {
       /* get some memory */
@@ -2970,7 +2970,7 @@ static size_t sizeofHDSType( const char * type, int * status ) {
 
 /* Copy from malloced buffers to mapped buffers */
 
-static void copyCache( const obsData * obsinfo, const subSystem * input, subSystem * output, 
+static void copyCache( const obsData * obsinfo, const subSystem * input, subSystem * output,
                        unsigned int nseq, int * status) {
   unsigned int i;
 
@@ -3065,7 +3065,7 @@ static int hasSeqSpectra( const obsData * obsinfo, subSystem * subsys,
         break;
       } else {
         /* full slot so keep looking */
-      }      
+      }
     }
     if (!found) {
       /* looks like all is full */
@@ -3114,7 +3114,7 @@ static int hasAllSpectraCareful( const obsData * obsinfo, const subSystem * subs
   if (*status != SAI__OK) return 0;
 
   /* get last valid offset in array */
-  last = calcOffset( 1, obsinfo->nrecep, obsinfo->nrecep - 1, 
+  last = calcOffset( 1, obsinfo->nrecep, obsinfo->nrecep - 1,
                      subsys->curpos - 1, status );
   if (*status == SAI__OK) {
     for (i=0; i < last; i++) {
@@ -3128,7 +3128,7 @@ static int hasAllSpectraCareful( const obsData * obsinfo, const subSystem * subs
   /* return true is missing is false */
   return ( missing ? 0 : 1 );
 }
-			  
+
 /* Write the OK flag file and content */
 
 static
@@ -3244,13 +3244,13 @@ void writeFlagFile (const obsData * obsinfo, const subSystem subsystems[],
     strncpy(flagfile_name, okfile, flagfile_length);
     flagfile_name[flagfile_length - 1] = '\0';
   }
-  
+
   return;
 }
 
 static
 void writeOneWCSandFITS (const obsData * obsinfo, const subSystem subsys,
-			 AstFitsChan * const fits, int * badfits, 
+			 AstFitsChan * const fits, int * badfits,
 			 char errbuff[], int * status) {
 
   char * fname;             /* file name of a given subscan */
@@ -3328,7 +3328,7 @@ void writeOneWCSandFITS (const obsData * obsinfo, const subSystem subsys,
 #if SPW_DEBUG_LEVEL > 0
     printf("Writing file FITS header %s\n", fname );
 #endif
-    if (fname != NULL) 
+    if (fname != NULL)
       ndfOpen( NULL, fname, "UPDATE", "OLD", &indf, &place, status );
 
     /* add the SUBSCAN number to the header - forcing one if not present */
@@ -3386,7 +3386,7 @@ void writeOneWCSandFITS (const obsData * obsinfo, const subSystem subsys,
 	       status );
       }
     }
-    
+
   }
 
   /* free the copy of the FITS header */
@@ -3408,7 +3408,7 @@ void writeOneWCSandFITS (const obsData * obsinfo, const subSystem subsys,
 
 static
 void writeAllWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
-			 AstFitsChan * const fits[], int badfits[], 
+			 AstFitsChan * const fits[], int badfits[],
 			 char errbuff[], int * status) {
 
   int i; /* loop counter */
@@ -3704,7 +3704,7 @@ AstFrameSet *specWcs( AstFrameSet * fs, const char veldef[], int ntime, const do
   /* We now have the SpecFrame, and the Mapping from grid coord to spectral
      coord. Now create a TimeFrame to describe MJD in the TAI timescale, and
      a LutMap which transforms grid coord into MJD (in days). The default
-     TimeFrame attribute values give us what we want. 
+     TimeFrame attribute values give us what we want.
      Work out the duration of the observation to decide on formatting.
      To give AST some help with formatting axes we use a TimeOrigin.
   */
@@ -3777,7 +3777,7 @@ AstFrameSet *specWcs( AstFrameSet * fs, const char veldef[], int ntime, const do
      connect it to the base (i.e. GRID) Frame. */
   astAddFrame( result, AST__BASE, totmap, totfrm );
 
-  /* Adjust the system on the basis of the requested velocity definition 
+  /* Adjust the system on the basis of the requested velocity definition
      (if we had a spec frame). Force GHz initially so that if we change
      back to FREQ the units will be remembered. */
   if (specfrm && astIsASpecFrame( specfrm )) {
@@ -3931,7 +3931,7 @@ void acsSpecSetMem ( const int nBytes, int *status ) {
   maxsequence = maxbytes / ( 1024.0 * 4.0 );
 
 }
-  
+
 
 /******************** kpgPtfts ***********************/
 
@@ -3994,8 +3994,8 @@ void acsSpecSetMem ( const int nBytes, int *status ) {
  *    GNU General Public License for more details.
  *
  *    You should have received a copy of the GNU General Public License
- *    along with this program (see SLA_CONDITIONS); if not, write to the 
- *    Free Software Foundation, Inc., 59 Temple Place, Suite 330, 
+ *    along with this program (see SLA_CONDITIONS); if not, write to the
+ *    Free Software Foundation, Inc., 59 Temple Place, Suite 330,
  *    Boston, MA  02111-1307  USA
 
  *  Authors:
@@ -4052,7 +4052,7 @@ static int acs_kpgPtfts( int indf, AstFitsChan * fchan, int * status ) {
 
   /* Rewind the FitsChan */
   astClear( lchan, "Card" );
-    
+
   /* Create FITS extension */
   fitsdim[0] = ncards;
   ndfXnew(indf, "FITS", "_CHAR*" FITSSTR, 1, fitsdim, &fitsloc, status );
