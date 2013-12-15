@@ -1,4 +1,3 @@
-
 /* Needed for fdopen declaration */
 #define _POSIX_C_SOURCE 200112L
 
@@ -1671,10 +1670,11 @@ static char * getFileRoot( unsigned int yyyymmdd, unsigned int subsys,
   /* Check subsys */
   CHECKSUBSYS(subsys, status );
 
-  /* Check backend type (default is a) */
-  if ( backendFlag == ACS__BACKEND_ACSIS ) btype = 'a';
-  else if ( backendFlag == ACS__BACKEND_DAS ) btype = 'h';
-  else btype = 'a';
+  /* No longer check backend type.  It is easier to use "a" for all since
+     the output file is supposed to mimic an ACSIS observation.  It also
+     avoids the confusion of "h"-prefix observations being combined into 
+     ga"-prefix products in the ORAC-DR pipeline. */
+  btype = 'a';
 
   /* Form the file name - assume posix filesystem */
   if (*status == SAI__OK) {
