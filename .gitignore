@@ -25,6 +25,7 @@ ltmain.sh
 missing
 spwTest
 stamp-h1
+.dirstamp
 starconf.status
 *.ok
 .*.ok
