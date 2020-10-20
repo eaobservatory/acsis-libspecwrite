@@ -234,8 +234,6 @@ static void myRealloc( void **pntr, size_t nbytes, int * status );
 
 static int hasAllSpectra( const obsData * obsinfo, const subSystem * subsys,
                           int * status );
-static int hasAllSpectraCareful( const obsData * obsinfo, const subSystem * subsys,
-                                 int * status );
 static int hasSeqSpectra( const obsData * obsinfo, subSystem * subsys,
                           unsigned int tindex, int * status );
 
@@ -1380,7 +1378,8 @@ acsSpecWriteTS( unsigned int subsysnum, unsigned int nchans, const float spectru
  */
 
 void
-acsSpecCloseTS( AstFitsChan * const fits[], int incArchiveBounds, int flagfile_length,
+acsSpecCloseTS( AstFitsChan * const fits[],
+                int incArchiveBounds __attribute__((unused)), int flagfile_length,
                 char * flagfile_name, int * status ) {
 
   unsigned int i;           /* Loop counter */
@@ -1562,7 +1561,6 @@ void acsRewriteWCS( int indf, int * status ) {
   AstFitsChan * outfchan = NULL;
   AstFrameSet * wcs = NULL;
   int badfits = 0;
-  int          place;       /* unused NDF placeholder */
 
   if (*status != SAI__OK) return;
   if (indf == NDF__NOID) return;
@@ -1672,7 +1670,7 @@ static char * getFileRoot( unsigned int yyyymmdd, unsigned int subsys,
 
   /* No longer check backend type.  It is easier to use "a" for all since
      the output file is supposed to mimic an ACSIS observation.  It also
-     avoids the confusion of "h"-prefix observations being combined into 
+     avoids the confusion of "h"-prefix observations being combined into
      ga"-prefix products in the ORAC-DR pipeline. */
   btype = 'a';
 
@@ -1800,7 +1798,7 @@ openNDF( const obsData * obsinfo, const subSystem * template, subSystem * file,
   int place;                   /* NDF placeholder */
   int ubnd[NDIMS];             /* upper pixel bounds */
 #ifdef SPECWRITE_WRITE_HISTORY
-  const char * const  history[1] = { "Initial writing of raw data." };
+  char * const  history[1] = { "Initial writing of raw data." };
 #endif
 
   if (*status != SAI__OK) return;
@@ -2746,7 +2744,8 @@ flushResources( const obsData * obsinfo, subSystem * subsys, int * status ) {
 
 /* Note that obsinfo and subsys can be NULL */
 
-static void freeResources ( obsData * obsinfo, subSystem * subsys, int * status) {
+static void freeResources ( obsData * obsinfo, subSystem * subsys,
+                            int *status __attribute__((unused))) {
 
   unsigned int i, pos;
 
@@ -3027,7 +3026,10 @@ static int hasSeqSpectra( const obsData * obsinfo, subSystem * subsys,
   unsigned int i;    /* loop counter */
   int missing = 0; /* true if we found a missing spectrum */
   int found = 0; /* true if we found a free slot */
+
+#if SPW_DEBUG_LEVEL > 0
   unsigned int curslot = 0; /* cache of current free slot index */
+#endif
 
   if (*status != SAI__OK) return 0;
 
@@ -3051,7 +3053,11 @@ static int hasSeqSpectra( const obsData * obsinfo, subSystem * subsys,
        we need to now read forward from firstFreeSlot to the end of the array
        until we find a new free slot */
     found = 0;
+
+#if SPW_DEBUG_LEVEL > 0
     curslot = subsys->tdata.firstFreeSlot;
+#endif
+
     for (i = subsys->tdata.firstFreeSlot; i < subsys->cursize; i++) {
       if ( (subsys->tdata.fullSlots)[i] == 0 ) {
         /* empty slot so update firstFreeSlot and break from loop. This could be
@@ -3087,8 +3093,8 @@ static int hasSeqSpectra( const obsData * obsinfo, subSystem * subsys,
    is stored.
 */
 
-static int hasAllSpectra( const obsData * obsinfo, const subSystem * subsys,
-                          int * status ) {
+static int hasAllSpectra( const obsData * obsinfo __attribute__((unused)),
+                          const subSystem * subsys, int * status __attribute__((unused)) ) {
 
   /* Note that curpos is 1-based and firstFreeSlot is 0-based so we can compare
      directly */
@@ -3097,36 +3103,6 @@ static int hasAllSpectra( const obsData * obsinfo, const subSystem * subsys,
   } else {
     return 0;
   }
-}
-
-/* See whether all spectra have been received for all sequences
-   received so far.  This is the careful method that looks at every entry in "count"
-   explcitly.
-
-*/
-
-static int hasAllSpectraCareful( const obsData * obsinfo, const subSystem * subsys,
-                                 int * status ) {
-  unsigned int last; /* end position into count data array */
-  unsigned int i;    /* loop counter */
-  int missing = 0; /* true if we found a missing spectrum */
-
-  if (*status != SAI__OK) return 0;
-
-  /* get last valid offset in array */
-  last = calcOffset( 1, obsinfo->nrecep, obsinfo->nrecep - 1,
-                     subsys->curpos - 1, status );
-  if (*status == SAI__OK) {
-    for (i=0; i < last; i++) {
-      if ( (subsys->tdata.count)[i] == 0 ) {
-        missing = 1;
-        break;
-      }
-    }
-  }
-
-  /* return true is missing is false */
-  return ( missing ? 0 : 1 );
 }
 
 /* Write the OK flag file and content */
@@ -3142,17 +3118,17 @@ void writeFlagFile (const obsData * obsinfo, const subSystem subsystems[],
   unsigned int i;           /* Loop counter */
   unsigned int j;           /* Loop counter */
   char * ldir = NULL;       /* subscan directory relative to rootdir */
-  char tmpok[MAXFILE];      /* temporary file name */
+  char tmpok[MAXFILE+20];   /* temporary file name */
   char *okfile;             /* name of ok file */
   int sysstat;              /* system status return */
-  const subSystem * subsys;       /* specific subsystem */
+  const subSystem * subsys; /* specific subsystem */
 
   if (*status != SAI__OK) return;
 
   /* We must first write to a temporary file so that we can rename it when it
      is complete. */
 
-  flen = snprintf(tmpok, MAXFILE,
+  flen = snprintf(tmpok, sizeof(tmpok),
                   "%s/tempXXXXXX",
                   obsinfo->rootdir );
   if (flen >= MAXFILE && status == SAI__OK) {
@@ -3261,12 +3237,11 @@ void writeOneWCSandFITS (const obsData * obsinfo, const subSystem subsys,
   int *        oldstat;     /* Internal AST status on entry */
   AstFrameSet *  wcs = NULL; /* World coordinates system from FITS header */
   int      tempscal = 0;   /* temperature scale? */
-  void * tpntr = NULL;     /* temporary generic pointer */
   char * stemp = NULL;     /* temporary pointer to string */
   int sysstat;             /* status from system call */
   char units[72];          /* Unit string from fits header BUNIT */
 #ifdef SPECWRITE_WRITE_HISTORY
-  const char * const history[1] = { "Finalise headers and make ICD compliant." };
+  char * const history[1] = { "Finalise headers and make ICD compliant." };
 #endif
   const char *skysys;         /* Sky system */
   char receppos_sys[16];  /* Coordinate frame for RECEPPOS */
@@ -3411,7 +3386,7 @@ void writeAllWCSandFITS (const obsData * obsinfo, const subSystem subsystems[],
 			 AstFitsChan * const fits[], int badfits[],
 			 char errbuff[], int * status) {
 
-  int i; /* loop counter */
+  unsigned int i; /* loop counter */
 
   /* headers to be retained */
   if (*status != SAI__OK) return;
@@ -4077,7 +4052,12 @@ static int acs_kpgPtfts( int indf, AstFitsChan * fchan, int * status ) {
     for (i = 1; i <= ncards; i++) {
       result = astFindFits( lchan, "%f", card, 1 );
       if (result) {
+/* Need to suppress warnings about bad pragmas temporarily since
+   "-Wstringop-truncation" was not recognised by earlier versions of gcc */
+        #pragma GCC diagnostic ignored "-Wpragmas"
+        #pragma GCC diagnostic ignored "-Wstringop-truncation"
         strncpy( fpntr, card, SZFITSCARD );
+        #pragma GCC diagnostic pop
         fpntr += SZFITSCARD;
       } else {
         break;
@@ -4273,7 +4253,7 @@ int acs_kpgGtfts( int indf, AstFitsChan ** fchan, int * status ) {
     oldstat = astWatch( status );
 
     /* Create a new FitsChan */
-    *fchan = astFitsChan( NULL, NULL, "" );
+    *fchan = astFitsChan( NULL, NULL, " " );
 
     /* store pointer to start of string in new variable for iteration */
     card = fpntr;
