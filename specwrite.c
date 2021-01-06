@@ -20,6 +20,9 @@
 #include <math.h>
 #include <time.h>
 
+/* Ensure the 4-byte NDF API is used. */
+#undef NDF_I8
+
 /* Starlink includes */
 #include "sae_par.h"
 #include "star/hds.h"
