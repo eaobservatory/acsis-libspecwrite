@@ -62,6 +62,11 @@
 # define USE_MERS
 #endif
 
+/* Need to suppress warnings about bad pragmas temporarily since
+   "-Wstringop-truncation" was not recognised by earlier versions of gcc */
+#pragma GCC diagnostic ignored "-Wpragmas"
+#pragma GCC diagnostic ignored "-Wstringop-truncation"
+
 /* Debug prints
    0 - disabled
    1 - standard debug
@@ -4055,12 +4060,7 @@ static int acs_kpgPtfts( int indf, AstFitsChan * fchan, int * status ) {
     for (i = 1; i <= ncards; i++) {
       result = astFindFits( lchan, "%f", card, 1 );
       if (result) {
-/* Need to suppress warnings about bad pragmas temporarily since
-   "-Wstringop-truncation" was not recognised by earlier versions of gcc */
-        #pragma GCC diagnostic ignored "-Wpragmas"
-        #pragma GCC diagnostic ignored "-Wstringop-truncation"
         strncpy( fpntr, card, SZFITSCARD );
-        #pragma GCC diagnostic pop
         fpntr += SZFITSCARD;
       } else {
         break;
